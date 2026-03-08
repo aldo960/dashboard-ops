@@ -245,6 +245,9 @@ export default function App() {
       return;
     }
 
+    // No intentar cargar datos hasta que el usuario esté autenticado
+    if (!currentUser) return;
+
     const fetchOrders = async () => {
       try {
         const { data, error } = await supabase!.from('orders').select('*');
@@ -291,7 +294,7 @@ export default function App() {
     return () => {
       supabase!.removeChannel(channel);
     };
-  }, []);
+  }, [currentUser]);
 
   // Merges two versions of an order: keeps all pallets/items from both, other fields from incoming
   const mergeOrders = (incoming: Order, local: Order): Order => {
