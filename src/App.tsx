@@ -213,6 +213,7 @@ export default function App() {
   const [bulkForm, setBulkForm] = useState({ loomSize: "15000", lineNo: "1", numPallets: "", weight: "", itemNo: "", boxes: "", qtyPerBox: "" });
 
   const [detailsTab, setDetailsTab] = useState<'general' | 'packing_list' | 'weight_sheet' | 'items' | 'order_check'>('general');
+  const [expandedCheckLines, setExpandedCheckLines] = useState<Record<string, boolean>>({});
   const [newItemNumberForm, setNewItemNumberForm] = useState("");
 
   const [printMode, setPrintMode] = useState<'none' | 'labels_all' | 'pallet_sheets_all' | 'packing_list' | 'weight_sheet' | 'label_single' | 'pallet_sheet_single' | 'truck_report'>('none');
@@ -759,11 +760,11 @@ export default function App() {
 
           <div className="space-y-1.5 text-[13px] text-slate-500 border-t border-slate-100 pt-4">
             <div className="flex justify-between"><span className="font-medium">PO:</span> <span className="text-slate-800 font-bold">{order.po || "N/A"}</span></div>
-            <div className="flex justify-between"><span className="font-medium">Truck:</span> <span className="text-blue-600 font-bold">{order.truckId || "Unassigned"}</span></div>
+            <div className="flex justify-between"><span className="font-medium">Truck:</span> <span className="text-slate-800 font-bold">{order.truckId || "Unassigned"}</span></div>
             <div className="flex gap-3 mt-3">
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Plts</p><p className="font-black text-slate-900">{totalP} {order.loomPallets ? <span className="text-[10px] text-gray-500 font-medium">({order.loomPallets} Lm)</span> : ""}</p></div>
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Boxes</p><p className="font-black text-slate-900">{order.boxes}</p></div>
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-blue-600">{Number(order.weight||0).toFixed(0)}</p></div>
+               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-slate-900">{Number(order.weight||0).toFixed(0)}</p></div>
             </div>
           </div>
         </div>
@@ -1050,7 +1051,7 @@ export default function App() {
   // RENDER: MAIN APPLICATION
   // -------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#c9cfd9] font-sans text-slate-900 selection:bg-indigo-100">
+    <div className="min-h-screen bg-[#eef0f3] font-sans text-slate-900 selection:bg-indigo-100">
       <header className="bg-white border-b sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm relative">
         {/* Logo */}
         <h1 className="text-lg sm:text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
@@ -1152,7 +1153,7 @@ export default function App() {
                               <div className="flex gap-4 text-[10px] font-bold text-slate-400">
                                 <span>{t.summary.pallets} Plts</span>
                                 <span>{t.summary.boxes} Bxs</span>
-                                <span className="text-blue-600 font-black">{t.summary.weight} LBS</span>
+                                <span className="text-slate-700 font-black">{t.summary.weight} LBS</span>
                               </div>
                             </div>
                             {expandedTrucks[`${dg.date}-${t.id}`] && (
@@ -1295,7 +1296,7 @@ export default function App() {
                  <div className="space-y-6">
                     {truckReportSummary.trucks.map(t => (
                        <div key={t.id} className="border border-gray-200 rounded-md overflow-hidden">
-                          <h3 className="bg-white text-blue-700 font-bold p-3 border-b flex items-center gap-2"><TruckIcon className="w-5 h-5"/> Truck: {t.id}</h3>
+                          <h3 className="bg-gray-100 text-gray-800 font-bold p-3 border-b flex items-center gap-2"><TruckIcon className="w-5 h-5"/> Truck: {t.id}</h3>
                           <table className="w-full text-sm text-left">
                              <thead className="bg-gray-50 text-gray-500 text-xs border-b">
                                 <tr><th className="p-3">Order #</th><th className="p-3">PO #</th><th className="p-3">Freight</th><th className="p-3 text-center">Loom Plts</th><th className="p-3 text-center">Normal Plts</th><th className="p-3 text-center">Total Boxes</th><th className="p-3 text-right">Weight (lbs)</th></tr>
@@ -1304,13 +1305,13 @@ export default function App() {
                                 {t.ordersData.map(o => (
                                    <tr key={o.id} className="border-b border-gray-100">
                                       <td className="p-3">{o.id}</td><td className="p-3">{o.po}</td><td className="p-3">{o.freight}</td>
-                                      <td className="p-3 text-center font-bold text-purple-600">{o.loomPlts}</td><td className="p-3 text-center">{o.normalPlts}</td>
+                                      <td className="p-3 text-center font-bold text-gray-800">{o.loomPlts}</td><td className="p-3 text-center">{o.normalPlts}</td>
                                       <td className="p-3 text-center">{o.finalBoxes}</td><td className="p-3 text-right">{Number(o.finalWeight||0).toFixed(2)}</td>
                                    </tr>
                                 ))}
                                 <tr className="bg-gray-50 font-bold text-gray-800">
                                    <td colSpan={3} className="p-3 text-right">Totals for {t.id}:</td>
-                                   <td className="p-3 text-center text-purple-700">{t.tLoom}</td><td className="p-3 text-center">{t.tNormal}</td>
+                                   <td className="p-3 text-center font-bold">{t.tLoom}</td><td className="p-3 text-center">{t.tNormal}</td>
                                    <td className="p-3 text-center">{t.tBoxes}</td><td className="p-3 text-right">{Number(t.tWeight||0).toFixed(2)}</td>
                                 </tr>
                              </tbody>
@@ -1318,18 +1319,30 @@ export default function App() {
                        </div>
                     ))}
 
-                    <div className="border border-gray-200 rounded-md p-6 mt-10">
-                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Calendar className="w-5 h-5"/> Totals for {formatDateLong(reportDate)}</h3>
-                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                          <div className="bg-gray-50 p-4 rounded text-center border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Trucks</p><p className="text-2xl font-bold">{truckReportSummary.grandTrucks}</p></div>
-                          <div className="bg-purple-50 p-4 rounded text-center border border-purple-200"><p className="text-xs font-bold text-purple-600 uppercase">Loom Pallets</p><p className="text-2xl font-bold text-purple-700">{truckReportSummary.grandLoomPlts}</p></div>
-                          <div className="bg-blue-50 p-4 rounded text-center border border-blue-200"><p className="text-xs font-bold text-blue-500 uppercase">Normal Pallets</p><p className="text-2xl font-bold text-blue-700">{truckReportSummary.grandNormalPlts}</p></div>
-                          <div className="bg-gray-50 p-4 rounded text-center border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Boxes</p><p className="text-2xl font-bold">{truckReportSummary.grandBoxes.toLocaleString()}</p></div>
+                    <div className="border border-gray-300 rounded-md mt-10 overflow-hidden">
+                       <div className="bg-gray-100 px-4 py-3 border-b border-gray-300">
+                          <h3 className="text-base font-bold text-gray-800 flex items-center gap-2"><Calendar className="w-4 h-4"/> Grand Totals — {formatDateLong(reportDate)}</h3>
                        </div>
-                       <div className="bg-green-50 p-4 rounded border border-green-200 w-full sm:w-1/4 min-w-[200px] text-center">
-                          <p className="text-xs font-bold text-green-600 uppercase">Total Weight</p>
-                          <p className="text-2xl font-bold text-green-700">{truckReportSummary.grandWeight.toLocaleString()} lbs</p>
-                       </div>
+                       <table className="w-full text-sm">
+                          <thead>
+                             <tr className="border-b border-gray-200 bg-gray-50">
+                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Trucks</th>
+                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Loom Pallets</th>
+                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Normal Pallets</th>
+                                <th className="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Total Boxes</th>
+                                <th className="px-4 py-2 text-right text-xs font-bold text-gray-500 uppercase tracking-wide">Total Weight</th>
+                             </tr>
+                          </thead>
+                          <tbody>
+                             <tr>
+                                <td className="px-4 py-4 text-2xl font-black text-gray-900">{truckReportSummary.grandTrucks}</td>
+                                <td className="px-4 py-4 text-2xl font-black text-gray-900">{truckReportSummary.grandLoomPlts}</td>
+                                <td className="px-4 py-4 text-2xl font-black text-gray-900">{truckReportSummary.grandNormalPlts}</td>
+                                <td className="px-4 py-4 text-2xl font-black text-gray-900">{truckReportSummary.grandBoxes.toLocaleString()}</td>
+                                <td className="px-4 py-4 text-2xl font-black text-gray-900 text-right">{truckReportSummary.grandWeight.toLocaleString()} lbs</td>
+                             </tr>
+                          </tbody>
+                       </table>
                     </div>
                  </div>
               ) : (
@@ -1693,6 +1706,7 @@ export default function App() {
                   <table className="w-full text-sm text-left border border-gray-200">
                     <thead className="bg-gray-100 text-gray-600">
                       <tr>
+                        <th className="p-3 border-b border-gray-300 w-8"></th>
                         <th className="p-3 border-b border-gray-300" rowSpan={2}>Line</th>
                         <th className="p-3 border-b border-gray-300" rowSpan={2}>Item Number</th>
                         <th className="p-3 border-b border-gray-300 text-center" colSpan={2}>Required (Paper)</th>
@@ -1700,6 +1714,7 @@ export default function App() {
                         <th className="p-3 border-b border-gray-300" rowSpan={2}>Status</th>
                       </tr>
                       <tr>
+                        <th className="border-b border-gray-300"></th>
                         <th className="p-2 border-b border-gray-300 text-center bg-gray-50">Boxes / Plts</th>
                         <th className="p-2 border-b border-gray-300 text-center bg-gray-50">Total Pcs</th>
                         <th className="p-2 border-b border-gray-300 text-center bg-gray-50">Boxes / Plts</th>
@@ -1710,53 +1725,75 @@ export default function App() {
                       {editingOrder.masterItems?.map(m => {
                         const packedQty = getPackedQtyForLine(m.lineNo, editingOrder);
                         const packedBoxes = getPackedBoxesForLine(m.lineNo, editingOrder);
-                        
                         const mQty = Number(m.orderedQty) || 0;
                         const mBoxes = Number(m.orderedBoxes) || 0;
-
                         const diffQty = packedQty - mQty;
                         const diffBoxes = packedBoxes - mBoxes;
-                        
                         const isMatch = (mQty > 0 || mBoxes > 0) && diffQty === 0 && diffBoxes === 0;
                         const isMissing = (mQty > 0 || mBoxes > 0) && (diffQty < 0 || diffBoxes < 0);
-
+                        const palletsWithLine = (editingOrder.palletList || []).filter(p => p.items.some(i => i.lineNo === m.lineNo));
+                        const isExpanded = expandedCheckLines[m.id];
                         return (
-                          <tr key={m.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
-                            <td className="p-3 font-bold">{m.lineNo}</td>
-                            <td className="p-3 font-mono">{m.itemNumber}</td>
-                            <td className="p-3 text-center">
-                               <input 
-                                 type="number" 
-                                 value={m.orderedBoxes || ""} 
-                                 onChange={e => handleUpdateMasterItem(m.id, 'orderedBoxes', Number(e.target.value))} 
-                                 onKeyDown={handleOrderCheckKeyDown}
-                                 className="order-check-input w-20 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" 
-                                 placeholder="0"
-                               />
-                            </td>
-                            <td className="p-3 text-center">
-                               <input 
-                                 type="number" 
-                                 value={m.orderedQty || ""} 
-                                 onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} 
-                                 onKeyDown={handleOrderCheckKeyDown}
-                                 className="order-check-input w-24 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" 
-                                 placeholder="0"
-                               />
-                            </td>
-                            <td className="p-3 text-center font-bold text-gray-800">{packedBoxes}</td>
-                            <td className="p-3 text-center font-bold text-gray-800">{packedQty.toLocaleString()}</td>
-                            <td className="p-3">
-                               {(mQty === 0 && mBoxes === 0) ? <span className="text-gray-400">Awaiting Input</span> : 
-                                isMatch ? <span className="text-green-600 font-bold bg-green-50 border border-green-200 px-2 py-1 rounded flex items-center w-max gap-1"><CheckCircle2 className="w-4 h-4"/> Matched</span> :
-                                isMissing ? <span className="text-red-600 font-bold bg-red-50 border border-red-200 px-2 py-1 rounded w-max block">Missing</span> :
-                                <span className="text-yellow-600 font-bold bg-yellow-50 border border-yellow-200 px-2 py-1 rounded w-max block">Overpacked</span>}
-                            </td>
-                          </tr>
+                          <React.Fragment key={m.id}>
+                            <tr className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                              <td className="p-3 text-center">
+                                <button onClick={() => setExpandedCheckLines(prev => ({...prev, [m.id]: !prev[m.id]}))}
+                                  className="text-gray-400 hover:text-gray-700 transition-colors" title="Ver pallets">
+                                  <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`}/>
+                                </button>
+                              </td>
+                              <td className="p-3 font-bold">{m.lineNo}</td>
+                              <td className="p-3 font-mono">{m.itemNumber}</td>
+                              <td className="p-3 text-center">
+                                <input type="number" value={m.orderedBoxes || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedBoxes', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-20 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" placeholder="0"/>
+                              </td>
+                              <td className="p-3 text-center">
+                                <input type="number" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-24 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" placeholder="0"/>
+                              </td>
+                              <td className="p-3 text-center font-bold text-gray-800">{packedBoxes}</td>
+                              <td className="p-3 text-center font-bold text-gray-800">{packedQty.toLocaleString()}</td>
+                              <td className="p-3">
+                                {(mQty === 0 && mBoxes === 0) ? <span className="text-gray-400">Awaiting Input</span> :
+                                 isMatch ? <span className="text-green-600 font-bold bg-green-50 border border-green-200 px-2 py-1 rounded flex items-center w-max gap-1"><CheckCircle2 className="w-4 h-4"/> Matched</span> :
+                                 isMissing ? <span className="text-red-600 font-bold bg-red-50 border border-red-200 px-2 py-1 rounded w-max block">Missing</span> :
+                                 <span className="text-yellow-600 font-bold bg-yellow-50 border border-yellow-200 px-2 py-1 rounded w-max block">Overpacked</span>}
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr className="bg-slate-50 border-b border-gray-200">
+                                <td colSpan={8} className="px-6 py-3">
+                                  {palletsWithLine.length === 0 ? (
+                                    <p className="text-xs text-gray-400 italic">This line has not been added to any pallet yet.</p>
+                                  ) : (
+                                    <div className="space-y-1.5">
+                                      <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Pallets with Line {m.lineNo}:</p>
+                                      {palletsWithLine.map(pallet => {
+                                        const lineItems = pallet.items.filter(i => i.lineNo === m.lineNo);
+                                        return (
+                                          <div key={pallet.id} className="flex items-center justify-between bg-white border border-gray-200 rounded px-3 py-2 shadow-sm">
+                                            <div className="flex items-center gap-4 text-sm">
+                                              <span className={`font-bold ${isLoomPallet(pallet) ? 'text-purple-700' : 'text-[#1e6acb]'}`}>Pallet {pallet.number}{isLoomPallet(pallet) ? ' (Loom)' : ''}</span>
+                                              {lineItems.map(li => (
+                                                <span key={li.id} className="text-gray-600">{li.boxes} boxes × {(Number(li.qtyPerBox)||0).toLocaleString()} qty/box = <b>{(li.boxes * (Number(li.qtyPerBox)||0)).toLocaleString()} pcs</b></span>
+                                              ))}
+                                            </div>
+                                            <button onClick={() => { setEditingPalletId(pallet.id); setDetailsTab('packing_list'); }}
+                                              className="flex items-center gap-1 px-3 py-1 bg-[#1e6acb] hover:bg-blue-700 text-white text-xs font-bold rounded shadow-sm">
+                                              <Pencil className="w-3 h-3"/> Edit Pallet
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                       {(!editingOrder.masterItems || editingOrder.masterItems.length === 0) && (
-                        <tr><td colSpan={7} className="p-6 text-center text-gray-500">Go to the "Items" tab to define the order lines first.</td></tr>
+                        <tr><td colSpan={8} className="p-6 text-center text-gray-500">Go to the "Items" tab to define the order lines first.</td></tr>
                       )}
                     </tbody>
                   </table>
