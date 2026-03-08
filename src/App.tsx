@@ -193,8 +193,7 @@ export default function App() {
   
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // --- Concurrent Edit Conflict ---
-  const [editConflict, setEditConflict] = useState(false);
+  // --- Concurrent Edit Merge ---
   const [mergeNotification, setMergeNotification] = useState(false);
   const editingOrderRef = useRef<Order | null>(null);
   const isSavingRef = useRef(false);
@@ -581,7 +580,6 @@ export default function App() {
     setDetailsTab('general');
     setActiveTab("Order Details");
     setEditingPalletId(null);
-    setEditConflict(false);
   };
 
   const openQuickEdit = (order: Order) => {
@@ -596,7 +594,6 @@ export default function App() {
     if (activeTab === "Order Details") {
       setEditingOrder(null);
       setActiveTab("Order Summary");
-      setEditConflict(false);
     }
   };
 
@@ -1399,7 +1396,7 @@ export default function App() {
         {activeTab === "Order Details" && editingOrder && (
           <div className="animate-in fade-in duration-300">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-              <button onClick={() => { setEditingOrder(null); setActiveTab("Order Summary"); setEditConflict(false); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
+              <button onClick={() => { setEditingOrder(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
               <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
                 <button onClick={() => setDetailsTab('general')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='general' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4 shrink-0"/> <span className="hidden xs:inline">Order </span>Details</button>
                 <button onClick={() => setDetailsTab('packing_list')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='packing_list' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4 shrink-0"/> Packing</button>
