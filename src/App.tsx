@@ -171,6 +171,8 @@ const getMockOrders = (): Order[] => {
 export default function App() {
   // --- Auth State ---
   const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(!IS_PLACEHOLDER_CREDENTIALS);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // --- Main State: Single Master List ---
   const [orders, setOrders] = useState<Order[]>([]);
@@ -215,6 +217,19 @@ export default function App() {
   const [printMode, setPrintMode] = useState<'none' | 'labels_all' | 'pallet_sheets_all' | 'packing_list' | 'weight_sheet' | 'label_single' | 'pallet_sheet_single' | 'truck_report'>('none');
   const [printTargetPallet, setPrintTargetPallet] = useState<PalletItem | null>(null);
   const [reportDate, setReportDate] = useState(getTodayUSFormat());
+
+  // --- Supabase Auth: restore session on load ---
+  useEffect(() => {
+    if (IS_PLACEHOLDER_CREDENTIALS) return;
+    supabase!.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user?.email ?? null);
+      setAuthLoading(false);
+    });
+    const { data: { subscription: authSub } } = supabase!.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user?.email ?? null);
+    });
+    return () => authSub.unsubscribe();
+  }, []);
 
   // --- Fetch Data & Setup Real-time Subscription ---
   useEffect(() => {
@@ -484,11 +499,24 @@ export default function App() {
   }, [reportDateData]);
 
   // --- UI Functions and Actions ---
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const fd = new FormData(e.target as HTMLFormElement);
-    const user = fd.get('username') as string;
-    if(user.trim()) setCurrentUser(user);
+    const email = fd.get('email') as string;
+    const password = fd.get('password') as string;
+    // Demo mode: accept any name
+    if (IS_PLACEHOLDER_CREDENTIALS) {
+      if (email.trim()) setCurrentUser(email.trim());
+      return;
+    }
+    setLoginError(null);
+    const { error } = await supabase!.auth.signInWithPassword({ email, password });
+    if (error) setLoginError('Incorrect email or password.');
+  };
+
+  const handleLogout = async () => {
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) await supabase.auth.signOut();
+    setCurrentUser(null);
   };
 
   const handleCreateOrder = (e: React.FormEvent) => {
@@ -742,21 +770,39 @@ export default function App() {
   // -------------------------------------------------------------------------
   // RENDER: LOGIN
   // -------------------------------------------------------------------------
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#f4f6f8] flex items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-3 text-slate-500">
+          <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"/>
+          <span className="text-sm font-medium">Verifying session…</span>
+        </div>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-[#f4f6f8] flex items-center justify-center font-sans">
         <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center"><User className="w-8 h-8"/></div>
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center"><User className="w-8 h-8"/></div>
           </div>
-          <h1 className="text-2xl font-black text-center text-gray-800 mb-2">Welcome Back</h1>
-          <p className="text-center text-gray-500 text-sm mb-8">Please enter your name to continue</p>
-          <form onSubmit={handleLogin} className="space-y-6">
+          <h1 className="text-2xl font-black text-center text-gray-800 mb-1">Welcome Back</h1>
+          <p className="text-center text-gray-500 text-sm mb-8">Sign in to access the dashboard</p>
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">Username</label>
-              <input name="username" autoFocus required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="e.g., John Doe" />
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Email</label>
+              <input name="email" type="email" autoFocus required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="you@mail.com" />
             </div>
-            <button type="submit" className="w-full bg-[#1e6acb] hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-md transition-colors">Login to System</button>
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Password</label>
+              <input name="password" type="password" required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="••••••••" />
+            </div>
+            {loginError && (
+              <p className="text-red-600 text-sm font-medium bg-red-50 border border-red-200 rounded-lg px-3 py-2">{loginError}</p>
+            )}
+            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold shadow-md transition-colors mt-2">Sign In</button>
           </form>
         </div>
       </div>
@@ -1019,7 +1065,7 @@ export default function App() {
         {/* Usuario + hamburger */}
         <div className="ml-auto flex items-center gap-2 sm:gap-4">
           <span className="hidden sm:inline text-sm font-medium text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></span>
-          <button onClick={() => setCurrentUser(null)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all" title="Log out"><LogOut className="w-5 h-5" /></button>
+          <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all" title="Log out"><LogOut className="w-5 h-5" /></button>
           {/* Hamburger — solo en móvil */}
           <button onClick={() => setMobileMenuOpen(v => !v)} className="sm:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5"/></button>
         </div>
