@@ -801,8 +801,8 @@ export default function App() {
             {order.notes && <p className="text-[12px] text-slate-500 italic border-t border-slate-100 pt-2 mt-1 line-clamp-2">{order.notes}</p>}
             <div className="flex gap-3 mt-3">
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Plts</p><p className="font-black text-slate-900">{totalP} {order.loomPallets ? <span className="text-[10px] text-gray-500 font-medium">({order.loomPallets} Lm)</span> : ""}</p></div>
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Boxes</p><p className="font-black text-slate-900">{order.boxes}</p></div>
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-slate-900">{Number(order.weight||0).toFixed(0)}</p></div>
+               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Boxes</p><p className="font-black text-slate-900">{Number(order.boxes||0).toLocaleString()}</p></div>
+               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-slate-900">{Number(order.weight||0).toLocaleString()}</p></div>
             </div>
           </div>
         </div>
@@ -897,7 +897,7 @@ export default function App() {
               <tbody>{(pallet.items || []).map(i => {
                 const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
                 const bxs = isLoom ? 1 : i.boxes;
-                return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{bxs}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
+                return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{Number(bxs||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
               })}</tbody>
             </table>
             {!isLoomPallet(pallet) && <p className="text-right mt-4 text-xs font-bold">Total Boxes on Pallet: {pallet.boxes}</p>}
@@ -913,7 +913,7 @@ export default function App() {
               <tbody>{(printTargetPallet.items || []).map(i => {
                 const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
                 const bxs = isLoom ? 1 : i.boxes;
-                return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{bxs}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
+                return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{Number(bxs||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
               })}</tbody>
             </table>
             {!isLoomPallet(printTargetPallet) && <p className="text-right mt-4 text-xs font-bold">Total Boxes on Pallet: {printTargetPallet.boxes}</p>}
@@ -926,7 +926,7 @@ export default function App() {
             <h1 className="text-center text-3xl font-bold mb-8 text-[#2c3e50]">Packing List</h1>
             <div className="mb-8 text-sm">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po} | <b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
-              <p><b>Total Boxes for Order:</b> {totals.boxes}</p>
+              <p><b>Total Boxes for Order:</b> {totals.boxes.toLocaleString()}</p>
             </div>
             <table className="w-full text-left border-collapse text-sm">
               <thead>
@@ -968,7 +968,7 @@ export default function App() {
                             <td className="p-3">{it.lineNo}</td>
                             <td className="p-3">Pallet {it.palletId}</td>
                             <td className="p-3">{it.itemNumber}</td>
-                            <td className="p-3 text-center">{bxs}</td>
+                            <td className="p-3 text-center">{bxs.toLocaleString()}</td>
                             <td className="p-3 text-center">{(Number(it.qtyPerBox)||0).toLocaleString()}</td>
                             <td className="p-3 text-right">{pcs.toLocaleString()}</td>
                           </tr>
@@ -976,7 +976,7 @@ export default function App() {
                         })}
                         <tr className="bg-gray-50 border-b-2 border-gray-300 font-bold text-gray-800">
                           <td colSpan={3} className="p-3 text-right">Subtotal Line {line}:</td>
-                          <td className="p-3 text-center">{subBoxes}</td>
+                          <td className="p-3 text-center">{subBoxes.toLocaleString()}</td>
                           <td className="p-3 text-center">-</td>
                           <td className="p-3 text-right">{subPcs.toLocaleString()}</td>
                         </tr>
@@ -996,7 +996,7 @@ export default function App() {
             <div className="mb-8 text-sm">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po}</p>
               <p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
-              <p><b>Total Boxes for Order:</b> {totals.boxes}</p>
+              <p><b>Total Boxes for Order:</b> {totals.boxes.toLocaleString()}</p>
             </div>
             <table className="w-full text-left border-collapse text-sm">
               <thead>
@@ -1012,7 +1012,7 @@ export default function App() {
                   return (
                     <tr key={p.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                       <td className="p-3 py-4 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
-                      <td className="p-3 py-4 text-center text-gray-800">{p.boxes}</td>
+                      <td className="p-3 py-4 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
                       <td className="p-3 py-4 text-right"><div className="inline-block min-w-[100px] h-8 border-b border-gray-400">{displayWeight}</div></td>
                     </tr>
                   )
@@ -1044,13 +1044,13 @@ export default function App() {
                       <tr key={o.id} className="border-b border-gray-100">
                         <td className="px-2 py-1.5">{o.id}</td><td className="px-2 py-1.5">{o.po}</td><td className="px-2 py-1.5">{o.freight}</td>
                         <td className="px-2 py-1.5 text-center font-bold">{o.loomPlts}</td><td className="px-2 py-1.5 text-center">{o.normalPlts}</td>
-                        <td className="px-2 py-1.5 text-center">{o.finalBoxes}</td><td className="px-2 py-1.5 text-right">{Number(o.finalWeight||0).toFixed(2)}</td>
+                        <td className="px-2 py-1.5 text-center">{Number(o.finalBoxes||0).toLocaleString()}</td><td className="px-2 py-1.5 text-right">{Number(o.finalWeight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                       </tr>
                     ))}
                     <tr className="bg-gray-50 font-bold text-gray-800">
                        <td colSpan={3} className="px-2 py-1.5 text-right text-[10px]">Totals for {t.id}:</td>
                        <td className="px-2 py-1.5 text-center font-bold">{t.tLoom}</td><td className="px-2 py-1.5 text-center">{t.tNormal}</td>
-                       <td className="px-2 py-1.5 text-center">{t.tBoxes}</td><td className="px-2 py-1.5 text-right">{Number(t.tWeight||0).toFixed(2)}</td>
+                       <td className="px-2 py-1.5 text-center">{Number(t.tBoxes||0).toLocaleString()}</td><td className="px-2 py-1.5 text-right">{Number(t.tWeight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1347,13 +1347,13 @@ export default function App() {
                                    <tr key={o.id} className="border-b border-gray-100">
                                       <td className="p-3">{o.id}</td><td className="p-3">{o.po}</td><td className="p-3">{o.freight}</td>
                                       <td className="p-3 text-center font-bold text-gray-800">{o.loomPlts}</td><td className="p-3 text-center">{o.normalPlts}</td>
-                                      <td className="p-3 text-center">{o.finalBoxes}</td><td className="p-3 text-right">{Number(o.finalWeight||0).toFixed(2)}</td>
+                                      <td className="p-3 text-center">{Number(o.finalBoxes||0).toLocaleString()}</td><td className="p-3 text-right">{Number(o.finalWeight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                                    </tr>
                                 ))}
                                 <tr className="bg-gray-50 font-bold text-gray-800">
                                    <td colSpan={3} className="p-3 text-right">Totals for {t.id}:</td>
                                    <td className="p-3 text-center font-bold">{t.tLoom}</td><td className="p-3 text-center">{t.tNormal}</td>
-                                   <td className="p-3 text-center">{t.tBoxes}</td><td className="p-3 text-right">{Number(t.tWeight||0).toFixed(2)}</td>
+                                   <td className="p-3 text-center">{Number(t.tBoxes||0).toLocaleString()}</td><td className="p-3 text-right">{Number(t.tWeight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                                 </tr>
                              </tbody>
                           </table>
@@ -1456,11 +1456,11 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-2 text-sm font-bold">
                         <span className="text-gray-800">Total Boxes:</span>
-                        <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{totals.boxes}</span>
+                        <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{Number(totals.boxes||0).toLocaleString()}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm font-bold">
                         <span className="text-gray-800">Total Weight:</span>
-                        <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{totals.weight.toFixed(2)} lbs</span>
+                        <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{Number(totals.weight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lbs</span>
                       </div>
                     </div>
 
@@ -1643,7 +1643,7 @@ export default function App() {
                                   <td className="p-3">{it.lineNo}</td>
                                   <td className="p-3">Pallet {it.palletId}</td>
                                   <td className="p-3">{it.itemNumber}</td>
-                                  <td className="p-3 text-center">{bxs}</td>
+                                  <td className="p-3 text-center">{Number(bxs||0).toLocaleString()}</td>
                                   <td className="p-3 text-center">{(Number(it.qtyPerBox)||0).toLocaleString()}</td>
                                   <td className="p-3 text-right">{pcs.toLocaleString()}</td>
                                 </tr>
@@ -1651,7 +1651,7 @@ export default function App() {
                               })}
                               <tr className="bg-gray-50 border-b-2 border-gray-300 font-bold text-gray-800">
                                 <td colSpan={3} className="p-3 text-right">Subtotal Line {line}:</td>
-                                <td className="p-3 text-center">{subBoxes}</td>
+                                <td className="p-3 text-center">{subBoxes.toLocaleString()}</td>
                                 <td className="p-3 text-center">-</td>
                                 <td className="p-3 text-right">{subPcs.toLocaleString()}</td>
                               </tr>
@@ -1686,7 +1686,7 @@ export default function App() {
                         return (
                           <tr key={p.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                             <td className="p-3 py-4 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
-                            <td className="p-3 py-4 text-center text-gray-800">{p.boxes}</td>
+                            <td className="p-3 py-4 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
                             <td className="p-3 py-4 text-right">
                                <input 
                                  value={displayWeight} 
@@ -1792,7 +1792,7 @@ export default function App() {
                               <td className="p-3 text-center">
                                 <input type="number" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-24 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" placeholder="0"/>
                               </td>
-                              <td className="p-3 text-center font-bold text-gray-800">{packedBoxes}</td>
+                              <td className="p-3 text-center font-bold text-gray-800">{packedBoxes.toLocaleString()}</td>
                               <td className="p-3 text-center font-bold text-gray-800">{packedQty.toLocaleString()}</td>
                               <td className="p-3">
                                 {(mQty === 0 && mBoxes === 0) ? <span className="text-gray-400">Awaiting Input</span> :
