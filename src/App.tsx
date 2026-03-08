@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { 
   Search,
@@ -6,6 +6,7 @@ import {
   Truck as TruckIcon,
   List,
   LogOut,
+  Menu,
   CheckCircle2,
   Clock,
   AlertCircle,
@@ -188,6 +189,13 @@ export default function App() {
   const [_activeOrderContext, setActiveOrderContext] = useState<EditContext | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
   
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // --- Concurrent Edit Conflict ---
+  const [editConflict, setEditConflict] = useState(false);
+  const editingOrderRef = useRef<Order | null>(null);
+  useEffect(() => { editingOrderRef.current = editingOrder; }, [editingOrder]);
+
   // --- Pallet Form States ---
   const [editingPalletId, setEditingPalletId] = useState<string | null>(null);
   const [movingPalletId, setMovingPalletId] = useState<string | null>(null);
@@ -245,7 +253,18 @@ export default function App() {
     // Suscripción a cambios en tiempo real en la tabla "orders"
     const channel = supabase!
       .channel('public:orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
+        // Detectar conflicto: alguien más editó la orden que estamos viendo
+        const incoming = payload.new as Order;
+        if (editingOrderRef.current && incoming.id === editingOrderRef.current.id) {
+          setEditConflict(true);
+        }
+        fetchOrders();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => {
+        fetchOrders();
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'orders' }, () => {
         fetchOrders();
       })
       .subscribe();
@@ -509,6 +528,7 @@ export default function App() {
     setDetailsTab('general');
     setActiveTab("Order Details");
     setEditingPalletId(null);
+    setEditConflict(false);
   };
 
   const openQuickEdit = (order: Order) => {
@@ -523,6 +543,7 @@ export default function App() {
     if (activeTab === "Order Details") {
       setEditingOrder(null);
       setActiveTab("Order Summary");
+      setEditConflict(false);
     }
   };
 
@@ -773,40 +794,40 @@ export default function App() {
 
         {/* PALLET SHEETS */}
         {(printMode === 'pallet_sheets_all' && editingOrder?.palletList) && editingOrder.palletList.map(pallet => (
-          <div key={pallet.id} className="sheet-page p-10 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
-            <h1 className="text-center text-2xl font-bold mb-8">Pallet Details: Pallet {pallet.number} {isLoomPallet(pallet) ? '(Loom)' : ''}</h1>
-            <div className="border border-gray-300 p-5 rounded-lg mb-8 bg-gray-50">
-              <p className="mb-1"><b>Order #:</b> {editingOrder.id}</p>
-              <p className="mb-1"><b>PO:</b> {editingOrder.po}</p>
-              <p className="mb-1"><b>Ship Date:</b> {editingOrder.shipmentDate}</p>
-              <p className="mb-1"><b>Pallet Weight:</b> {pallet.weight} lbs</p>
+          <div key={pallet.id} className="sheet-page p-8 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
+            <h1 className="text-center text-base font-bold mb-4">Pallet Details: Pallet {pallet.number} {isLoomPallet(pallet) ? '(Loom)' : ''}</h1>
+            <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto">
+              <p><b>Order #:</b> {editingOrder.id}</p>
+              <p><b>PO:</b> {editingOrder.po}</p>
+              <p><b>Ship Date:</b> {editingOrder.shipmentDate}</p>
+              <p><b>Weight:</b> {pallet.weight} lbs</p>
             </div>
-            <h3 className="text-lg font-bold mb-4">Items on Pallet</h3>
-            <table className="w-full text-left border-collapse">
-              <thead><tr className="bg-gray-100"><th className="p-2 border-b-2 border-gray-300 text-sm">LINE</th><th className="p-2 border-b-2 border-gray-300 text-sm">ITEM #</th><th className="p-2 border-b-2 border-gray-300 text-sm text-center">BOXES / PLT</th><th className="p-2 border-b-2 border-gray-300 text-sm text-center">QTY/BOX</th><th className="p-2 border-b-2 border-gray-300 text-sm text-right">TOTAL PCS</th></tr></thead>
+            <h3 className="text-xs font-bold mb-2 uppercase tracking-wide text-gray-600">Items on Pallet</h3>
+            <table className="w-full text-left border-collapse text-xs">
+              <thead><tr className="bg-gray-100"><th className="px-2 py-1.5 border-b-2 border-gray-300">LINE</th><th className="px-2 py-1.5 border-b-2 border-gray-300">ITEM #</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">BOXES / PLT</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">QTY/BOX</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-right">TOTAL PCS</th></tr></thead>
               <tbody>{(pallet.items || []).map(i => {
                 const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
                 const bxs = isLoom ? 1 : i.boxes;
-                return (<tr key={i.id}><td className="p-2 border-b border-gray-200">{i.lineNo}</td><td className="p-2 border-b border-gray-200">{i.itemNumber}</td><td className="p-2 border-b border-gray-200 text-center">{bxs}</td><td className="p-2 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="p-2 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
+                return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{bxs}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
               })}</tbody>
             </table>
-            {!isLoomPallet(pallet) && <h3 className="text-right mt-6 font-bold">Total Boxes on Pallet: {pallet.boxes}</h3>}
+            {!isLoomPallet(pallet) && <p className="text-right mt-4 text-xs font-bold">Total Boxes on Pallet: {pallet.boxes}</p>}
           </div>
         ))}
         {(printMode === 'pallet_sheet_single' && printTargetPallet) && (
-          <div className="sheet-page p-10 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
-            <h1 className="text-center text-2xl font-bold mb-8">Pallet Details: Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h1>
-            <div className="border border-gray-300 p-5 rounded-lg mb-8 bg-gray-50"><p className="mb-1"><b>Order #:</b> {editingOrder?.id}</p><p className="mb-1"><b>PO:</b> {editingOrder?.po}</p><p className="mb-1"><b>Ship Date:</b> {editingOrder?.shipmentDate}</p><p className="mb-1"><b>Pallet Weight:</b> {printTargetPallet.weight} lbs</p></div>
-            <h3 className="text-lg font-bold mb-4">Items on Pallet</h3>
-            <table className="w-full text-left border-collapse">
-              <thead><tr className="bg-gray-100"><th className="p-2 border-b-2 border-gray-300 text-sm">LINE</th><th className="p-2 border-b-2 border-gray-300 text-sm">ITEM #</th><th className="p-2 border-b-2 border-gray-300 text-sm text-center">BOXES / PLT</th><th className="p-2 border-b-2 border-gray-300 text-sm text-center">QTY/BOX</th><th className="p-2 border-b-2 border-gray-300 text-sm text-right">TOTAL PCS</th></tr></thead>
+          <div className="sheet-page p-8 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
+            <h1 className="text-center text-base font-bold mb-4">Pallet Details: Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h1>
+            <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto"><p><b>Order #:</b> {editingOrder?.id}</p><p><b>PO:</b> {editingOrder?.po}</p><p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p><p><b>Weight:</b> {printTargetPallet.weight} lbs</p></div>
+            <h3 className="text-xs font-bold mb-2 uppercase tracking-wide text-gray-600">Items on Pallet</h3>
+            <table className="w-full text-left border-collapse text-xs">
+              <thead><tr className="bg-gray-100"><th className="px-2 py-1.5 border-b-2 border-gray-300">LINE</th><th className="px-2 py-1.5 border-b-2 border-gray-300">ITEM #</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">BOXES / PLT</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">QTY/BOX</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-right">TOTAL PCS</th></tr></thead>
               <tbody>{(printTargetPallet.items || []).map(i => {
                 const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
                 const bxs = isLoom ? 1 : i.boxes;
-                return (<tr key={i.id}><td className="p-2 border-b border-gray-200">{i.lineNo}</td><td className="p-2 border-b border-gray-200">{i.itemNumber}</td><td className="p-2 border-b border-gray-200 text-center">{bxs}</td><td className="p-2 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="p-2 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
+                return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{bxs}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
               })}</tbody>
             </table>
-            {!isLoomPallet(printTargetPallet) && <h3 className="text-right mt-6 font-bold">Total Boxes on Pallet: {printTargetPallet.boxes}</h3>}
+            {!isLoomPallet(printTargetPallet) && <p className="text-right mt-4 text-xs font-bold">Total Boxes on Pallet: {printTargetPallet.boxes}</p>}
           </div>
         )}
 
@@ -914,57 +935,57 @@ export default function App() {
 
         {/* TRUCK REPORT */}
         {printMode === 'truck_report' && (
-          <div className="p-10 font-sans mx-auto max-w-[11in] sheet-page">
-            <h1 className="text-center text-3xl font-bold mb-6 text-[#2c3e50]">Shipping Report</h1>
-            <h2 className="text-center text-xl font-bold mb-10">Date: {formatDateLong(reportDate)}</h2>
-            
+          <div className="p-8 font-sans mx-auto max-w-[8.5in] sheet-page">
+            <h1 className="text-center text-lg font-bold mb-1 text-[#2c3e50]">Shipping Report</h1>
+            <h2 className="text-center text-sm font-semibold mb-6 text-gray-600">Date: {formatDateLong(reportDate)}</h2>
+
             {truckReportSummary.trucks.map(t => (
-              <div key={t.id} className="mb-8">
-                <h3 className="text-lg font-bold mb-2">Truck: {t.id}</h3>
-                <table className="w-full text-sm text-left border-collapse mb-2">
-                  <thead className="bg-gray-100 uppercase text-[10px] text-gray-600">
+              <div key={t.id} className="mb-6">
+                <h3 className="text-xs font-bold mb-1.5 uppercase tracking-wide text-gray-700">Truck: {t.id}</h3>
+                <table className="w-full text-xs text-left border-collapse mb-1">
+                  <thead className="bg-gray-100 uppercase text-[9px] text-gray-600">
                     <tr>
-                      <th className="p-2 border-b border-gray-300">ORDER #</th><th className="p-2 border-b border-gray-300">PO #</th><th className="p-2 border-b border-gray-300">FREIGHT</th>
-                      <th className="p-2 border-b border-gray-300 text-center">LOOM PLTS</th><th className="p-2 border-b border-gray-300 text-center">NORMAL PLTS</th>
-                      <th className="p-2 border-b border-gray-300 text-center">TOTAL BOXES</th><th className="p-2 border-b border-gray-300 text-right">WEIGHT (LBS)</th>
+                      <th className="px-2 py-1.5 border-b border-gray-300">ORDER #</th><th className="px-2 py-1.5 border-b border-gray-300">PO #</th><th className="px-2 py-1.5 border-b border-gray-300">FREIGHT</th>
+                      <th className="px-2 py-1.5 border-b border-gray-300 text-center">LOOM PLTS</th><th className="px-2 py-1.5 border-b border-gray-300 text-center">NORMAL PLTS</th>
+                      <th className="px-2 py-1.5 border-b border-gray-300 text-center">TOTAL BOXES</th><th className="px-2 py-1.5 border-b border-gray-300 text-right">WEIGHT (LBS)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {t.ordersData.map(o => (
                       <tr key={o.id} className="border-b border-gray-100">
-                        <td className="p-3">{o.id}</td><td className="p-3">{o.po}</td><td className="p-3">{o.freight}</td>
-                        <td className="p-3 text-center font-bold text-purple-600">{o.loomPlts}</td><td className="p-3 text-center">{o.normalPlts}</td>
-                        <td className="p-3 text-center">{o.finalBoxes}</td><td className="p-3 text-right">{Number(o.finalWeight||0).toFixed(2)}</td>
+                        <td className="px-2 py-1.5">{o.id}</td><td className="px-2 py-1.5">{o.po}</td><td className="px-2 py-1.5">{o.freight}</td>
+                        <td className="px-2 py-1.5 text-center font-bold text-purple-600">{o.loomPlts}</td><td className="px-2 py-1.5 text-center">{o.normalPlts}</td>
+                        <td className="px-2 py-1.5 text-center">{o.finalBoxes}</td><td className="px-2 py-1.5 text-right">{Number(o.finalWeight||0).toFixed(2)}</td>
                       </tr>
                     ))}
                     <tr className="bg-gray-50 font-bold text-gray-800">
-                       <td colSpan={3} className="p-3 text-right">Totals for {t.id}:</td>
-                       <td className="p-3 text-center text-purple-700">{t.tLoom}</td><td className="p-3 text-center">{t.tNormal}</td>
-                       <td className="p-3 text-center">{t.tBoxes}</td><td className="p-3 text-right">{Number(t.tWeight||0).toFixed(2)}</td>
+                       <td colSpan={3} className="px-2 py-1.5 text-right text-[10px]">Totals for {t.id}:</td>
+                       <td className="px-2 py-1.5 text-center text-purple-700">{t.tLoom}</td><td className="px-2 py-1.5 text-center">{t.tNormal}</td>
+                       <td className="px-2 py-1.5 text-center">{t.tBoxes}</td><td className="px-2 py-1.5 text-right">{Number(t.tWeight||0).toFixed(2)}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             ))}
-            
-            <h3 className="text-xl font-bold mt-12 mb-4">Grand Totals for {formatDateLong(reportDate)}</h3>
-            <table className="w-full text-left border-collapse border border-gray-300">
+
+            <h3 className="text-sm font-bold mt-8 mb-3">Grand Totals for {formatDateLong(reportDate)}</h3>
+            <table className="w-full text-left border-collapse border border-gray-300 text-xs">
                <thead>
                  <tr className="bg-gray-100">
-                   <th className="p-4 border-r border-gray-300">Total Trucks/Methods:</th>
-                   <th className="p-4 border-r border-gray-300 text-purple-700">Total Loom Pallets:</th>
-                   <th className="p-4 border-r border-gray-300 text-blue-700">Total Normal Pallets:</th>
-                   <th className="p-4 border-r border-gray-300 text-orange-700">Total Boxes:</th>
-                   <th className="p-4 text-green-700">Total Weight:</th>
+                   <th className="px-3 py-2 border-r border-gray-300">Total Trucks/Methods:</th>
+                   <th className="px-3 py-2 border-r border-gray-300 text-purple-700">Total Loom Pallets:</th>
+                   <th className="px-3 py-2 border-r border-gray-300 text-blue-700">Total Normal Pallets:</th>
+                   <th className="px-3 py-2 border-r border-gray-300 text-orange-700">Total Boxes:</th>
+                   <th className="px-3 py-2 text-green-700">Total Weight:</th>
                  </tr>
                </thead>
                <tbody>
                  <tr>
-                   <td className="p-4 text-xl font-bold border-r border-gray-300">{truckReportSummary.grandTrucks}</td>
-                   <td className="p-4 text-xl font-bold border-r border-gray-300">{truckReportSummary.grandLoomPlts}</td>
-                   <td className="p-4 text-xl font-bold border-r border-gray-300">{truckReportSummary.grandNormalPlts}</td>
-                   <td className="p-4 text-xl font-bold border-r border-gray-300">{truckReportSummary.grandBoxes.toLocaleString()}</td>
-                   <td className="p-4 text-xl font-bold">{truckReportSummary.grandWeight.toLocaleString()} lbs</td>
+                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandTrucks}</td>
+                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandLoomPlts}</td>
+                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandNormalPlts}</td>
+                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandBoxes.toLocaleString()}</td>
+                   <td className="px-3 py-2 text-base font-bold">{truckReportSummary.grandWeight.toLocaleString()} lbs</td>
                  </tr>
                </tbody>
             </table>
@@ -980,11 +1001,11 @@ export default function App() {
   // -------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#fcfdfe] font-sans text-slate-900 selection:bg-indigo-100">
-      <header className="bg-white border-b sticky top-0 z-30 px-8 flex items-center h-16 shadow-sm relative">
-        {/* Logo — izquierda */}
-        <h1 className="text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
-        {/* Nav — centrado absolutamente */}
-        <nav className="absolute left-1/2 -translate-x-1/2 flex h-full items-center gap-1">
+      <header className="bg-white border-b sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm relative">
+        {/* Logo */}
+        <h1 className="text-lg sm:text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
+        {/* Nav — centrado en desktop, oculto en móvil */}
+        <nav className="hidden sm:flex absolute left-1/2 -translate-x-1/2 h-full items-center gap-1">
           {[
             { id: "Order Summary", icon: <List className="w-4 h-4"/>, label: "Order Summary" },
             { id: "Create Order", icon: <Plus className="w-4 h-4"/>, label: "Create Order" },
@@ -995,14 +1016,34 @@ export default function App() {
             </button>
           ))}
         </nav>
-        {/* Usuario — derecha */}
-        <div className="ml-auto flex items-center gap-4">
-          <span className="text-sm font-medium text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></span>
+        {/* Usuario + hamburger */}
+        <div className="ml-auto flex items-center gap-2 sm:gap-4">
+          <span className="hidden sm:inline text-sm font-medium text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></span>
           <button onClick={() => setCurrentUser(null)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all" title="Log out"><LogOut className="w-5 h-5" /></button>
+          {/* Hamburger — solo en móvil */}
+          <button onClick={() => setMobileMenuOpen(v => !v)} className="sm:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5"/></button>
         </div>
       </header>
+      {/* Mobile nav drawer */}
+      {mobileMenuOpen && (
+        <div className="sm:hidden fixed inset-0 z-40 bg-slate-900/40" onClick={() => setMobileMenuOpen(false)}>
+          <div className="absolute top-14 left-0 right-0 bg-white border-b shadow-lg" onClick={e => e.stopPropagation()}>
+            {[
+              { id: "Order Summary", icon: <List className="w-5 h-5"/>, label: "Order Summary" },
+              { id: "Create Order", icon: <Plus className="w-5 h-5"/>, label: "Create Order" },
+              { id: "Truck Report", icon: <TruckIcon className="w-5 h-5"/>, label: "Truck Report" }
+            ].map(tab => (
+              <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
+                className={`w-full flex items-center gap-3 px-6 py-4 text-sm font-semibold border-b border-slate-100 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "text-indigo-600 bg-indigo-50" : "text-slate-700 hover:bg-slate-50"}`}>
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+            <div className="px-6 py-4 text-sm text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></div>
+          </div>
+        </div>
+      )}
 
-      <main className="max-w-[1400px] mx-auto p-8">
+      <main className="max-w-[1400px] mx-auto px-4 py-6 sm:p-8">
         {activeTab === "Order Summary" && (
           <div className="animate-in fade-in duration-500">
             <div className="flex flex-col md:flex-row justify-between items-end gap-4 mb-10">
@@ -1250,16 +1291,38 @@ export default function App() {
         {/* VIEW: ORDER DETAILS */}
         {activeTab === "Order Details" && editingOrder && (
           <div className="animate-in fade-in duration-300">
-            <div className="flex justify-between items-center mb-6">
-              <button onClick={() => { setEditingOrder(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><ArrowLeft className="w-4 h-4"/> Back to Dashboard</button>
-              <div className="flex gap-2 flex-wrap justify-end">
-                <button onClick={() => setDetailsTab('general')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='general' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4"/> Order Details</button>
-                <button onClick={() => setDetailsTab('packing_list')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='packing_list' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4"/> Packing List</button>
-                <button onClick={() => setDetailsTab('weight_sheet')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='weight_sheet' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Package className="w-4 h-4"/> Weight Sheet</button>
-                <button onClick={() => setDetailsTab('items')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='items' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><List className="w-4 h-4"/> Items</button>
-                <button onClick={() => setDetailsTab('order_check')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='order_check' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><CheckSquare className="w-4 h-4"/> Order Check</button>
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
+              <button onClick={() => { setEditingOrder(null); setActiveTab("Order Summary"); setEditConflict(false); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
+                <button onClick={() => setDetailsTab('general')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='general' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4 shrink-0"/> <span className="hidden xs:inline">Order </span>Details</button>
+                <button onClick={() => setDetailsTab('packing_list')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='packing_list' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4 shrink-0"/> Packing</button>
+                <button onClick={() => setDetailsTab('weight_sheet')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='weight_sheet' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Package className="w-4 h-4 shrink-0"/> Weight</button>
+                <button onClick={() => setDetailsTab('items')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='items' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><List className="w-4 h-4 shrink-0"/> Items</button>
+                <button onClick={() => setDetailsTab('order_check')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='order_check' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><CheckSquare className="w-4 h-4 shrink-0"/> Check</button>
               </div>
             </div>
+
+            {/* Banner de conflicto de edición simultánea */}
+            {editConflict && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-amber-800 text-sm font-medium">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0"/>
+                  Another user saved changes to this order while you were editing.
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => {
+                    const latest = orders.find(o => o.id === editingOrder?.id);
+                    if (latest) setEditingOrder(JSON.parse(JSON.stringify(latest)));
+                    setEditConflict(false);
+                  }} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded">
+                    Reload Latest
+                  </button>
+                  <button onClick={() => setEditConflict(false)} className="px-3 py-1.5 bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 text-xs font-bold rounded">
+                    Keep Mine
+                  </button>
+                </div>
+              </div>
+            )}
 
             {detailsTab === 'general' && (
               <>
@@ -1281,17 +1344,17 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="flex gap-16 mb-5 border-b border-gray-100 pb-5">
+                    <div className="flex flex-wrap gap-4 mb-5 border-b border-gray-100 pb-5">
                       <div className="flex items-center gap-2 text-sm font-bold">
-                        <span className="text-gray-800">Total Pallets:</span> 
+                        <span className="text-gray-800">Total Pallets:</span>
                         <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{totals.pallets} <span className="text-xs text-gray-500 font-medium">({totals.normalPallets} Plts, {totals.loomPallets} Looms)</span></span>
                       </div>
                       <div className="flex items-center gap-2 text-sm font-bold">
-                        <span className="text-gray-800">Total Boxes (Order):</span> 
+                        <span className="text-gray-800">Total Boxes:</span>
                         <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{totals.boxes}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm font-bold">
-                        <span className="text-gray-800">Total Weight (Order):</span> 
+                        <span className="text-gray-800">Total Weight:</span>
                         <span className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 text-base">{totals.weight.toFixed(2)} lbs</span>
                       </div>
                     </div>
