@@ -846,7 +846,7 @@ export default function App() {
         {/* PALLET SHEETS */}
         {(printMode === 'pallet_sheets_all' && editingOrder?.palletList) && editingOrder.palletList.map(pallet => (
           <div key={pallet.id} className="sheet-page p-8 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
-            <h1 className="text-center text-base font-bold mb-4">Pallet Details: Pallet {pallet.number} {isLoomPallet(pallet) ? '(Loom)' : ''}</h1>
+            <h1 className="text-center text-base font-bold mb-4">Pallet {pallet.number} {isLoomPallet(pallet) ? '(Loom)' : ''}</h1>
             <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto">
               <p><b>Order #:</b> {editingOrder.id}</p>
               <p><b>PO:</b> {editingOrder.po}</p>
@@ -867,7 +867,7 @@ export default function App() {
         ))}
         {(printMode === 'pallet_sheet_single' && printTargetPallet) && (
           <div className="sheet-page p-8 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
-            <h1 className="text-center text-base font-bold mb-4">Pallet Details: Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h1>
+            <h1 className="text-center text-base font-bold mb-4">Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h1>
             <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto"><p><b>Order #:</b> {editingOrder?.id}</p><p><b>PO:</b> {editingOrder?.po}</p><p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p><p><b>Weight:</b> {printTargetPallet.weight} lbs</p></div>
             <h3 className="text-xs font-bold mb-2 uppercase tracking-wide text-gray-600">Items on Pallet</h3>
             <table className="w-full text-left border-collapse text-xs">
@@ -958,7 +958,7 @@ export default function App() {
             <div className="mb-8 text-sm">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po}</p>
               <p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
-              <p><b>Total Boxes for Order (as per system):</b> {totals.boxes}</p>
+              <p><b>Total Boxes for Order:</b> {totals.boxes}</p>
             </div>
             <table className="w-full text-left border-collapse text-sm">
               <thead>
@@ -1005,13 +1005,13 @@ export default function App() {
                     {t.ordersData.map(o => (
                       <tr key={o.id} className="border-b border-gray-100">
                         <td className="px-2 py-1.5">{o.id}</td><td className="px-2 py-1.5">{o.po}</td><td className="px-2 py-1.5">{o.freight}</td>
-                        <td className="px-2 py-1.5 text-center font-bold text-purple-600">{o.loomPlts}</td><td className="px-2 py-1.5 text-center">{o.normalPlts}</td>
+                        <td className="px-2 py-1.5 text-center font-bold">{o.loomPlts}</td><td className="px-2 py-1.5 text-center">{o.normalPlts}</td>
                         <td className="px-2 py-1.5 text-center">{o.finalBoxes}</td><td className="px-2 py-1.5 text-right">{Number(o.finalWeight||0).toFixed(2)}</td>
                       </tr>
                     ))}
                     <tr className="bg-gray-50 font-bold text-gray-800">
                        <td colSpan={3} className="px-2 py-1.5 text-right text-[10px]">Totals for {t.id}:</td>
-                       <td className="px-2 py-1.5 text-center text-purple-700">{t.tLoom}</td><td className="px-2 py-1.5 text-center">{t.tNormal}</td>
+                       <td className="px-2 py-1.5 text-center font-bold">{t.tLoom}</td><td className="px-2 py-1.5 text-center">{t.tNormal}</td>
                        <td className="px-2 py-1.5 text-center">{t.tBoxes}</td><td className="px-2 py-1.5 text-right">{Number(t.tWeight||0).toFixed(2)}</td>
                     </tr>
                   </tbody>
@@ -1024,10 +1024,10 @@ export default function App() {
                <thead>
                  <tr className="bg-gray-100">
                    <th className="px-3 py-2 border-r border-gray-300">Total Trucks/Methods:</th>
-                   <th className="px-3 py-2 border-r border-gray-300 text-purple-700">Total Loom Pallets:</th>
-                   <th className="px-3 py-2 border-r border-gray-300 text-blue-700">Total Normal Pallets:</th>
-                   <th className="px-3 py-2 border-r border-gray-300 text-orange-700">Total Boxes:</th>
-                   <th className="px-3 py-2 text-green-700">Total Weight:</th>
+                   <th className="px-3 py-2 border-r border-gray-300">Total Loom Pallets:</th>
+                   <th className="px-3 py-2 border-r border-gray-300">Total Normal Pallets:</th>
+                   <th className="px-3 py-2 border-r border-gray-300">Total Boxes:</th>
+                   <th className="px-3 py-2">Total Weight:</th>
                  </tr>
                </thead>
                <tbody>
@@ -1180,13 +1180,16 @@ export default function App() {
                 <div className="space-y-8 opacity-75 hover:opacity-100 transition-opacity">
                   {pastCompletedDates.map(dg => (
                     <div key={dg.date} className="bg-slate-50 rounded-2xl border border-slate-200 shadow-sm overflow-hidden grayscale hover:grayscale-0 transition-all">
-                      <button onClick={() => toggleDate(dg.date)} className="w-full flex items-center justify-between p-5 hover:bg-slate-100/50 transition-colors">
-                        <div className="flex items-center gap-4">
+                      <div className="flex items-center justify-between pr-4 hover:bg-slate-100/50 transition-colors">
+                        <button onClick={() => toggleDate(dg.date)} className="flex-1 flex items-center gap-4 p-5 text-left">
                           <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><CheckCircle2 className="w-5 h-5 text-emerald-600"/></div>
                           <span className="text-base font-bold text-slate-700">Completed on {dg.date}</span>
-                        </div>
-                        <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${expandedDates[dg.date] ? 'rotate-180' : ''}`} />
-                      </button>
+                          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${expandedDates[dg.date] ? 'rotate-180' : ''}`} />
+                        </button>
+                        <button onClick={() => { const allOrders = dg.trucks.flatMap(t => t.orders); setConfirmDialog({isOpen:true, title:"Delete All Orders", message:`Delete all ${allOrders.length} order(s) from ${dg.date}? This cannot be undone.`, onConfirm: async () => { for(const o of allOrders) await executeDeleteOrder({orderId: o.id}); }}); }} className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200 rounded-lg" title="Delete all orders for this date">
+                          <Trash2 className="w-3.5 h-3.5"/> Delete Date
+                        </button>
+                      </div>
                       
                       {expandedDates[dg.date] && (
                         <div className="p-6 space-y-6">
@@ -1777,7 +1780,7 @@ export default function App() {
                                                 <span key={li.id} className="text-gray-600">{li.boxes} boxes × {(Number(li.qtyPerBox)||0).toLocaleString()} qty/box = <b>{(li.boxes * (Number(li.qtyPerBox)||0)).toLocaleString()} pcs</b></span>
                                               ))}
                                             </div>
-                                            <button onClick={() => { setEditingPalletId(pallet.id); setDetailsTab('packing_list'); }}
+                                            <button onClick={() => setEditingPalletId(pallet.id)}
                                               className="flex items-center gap-1 px-3 py-1 bg-[#1e6acb] hover:bg-blue-700 text-white text-xs font-bold rounded shadow-sm">
                                               <Pencil className="w-3 h-3"/> Edit Pallet
                                             </button>
@@ -1993,7 +1996,7 @@ export default function App() {
                   </label>
                   {editingOrder.isManualOverride && (
                     <div className="grid grid-cols-2 gap-3 bg-white p-4 border border-gray-200 rounded">
-                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Normal Pallets</label><input type="number" value={editingOrder.normalPallets || editingOrder.pallets} onChange={e => handleInputChange('normalPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
+                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Normal Pallets</label><input type="number" value={editingOrder.normalPallets ?? editingOrder.pallets ?? 0} onChange={e => handleInputChange('normalPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Loom Pallets</label><input type="number" value={editingOrder.loomPallets || 0} onChange={e => handleInputChange('loomPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
                        <div><label className="block text-xs font-bold text-gray-600 mb-1">Total Boxes</label><input type="number" value={editingOrder.boxes} onChange={e => handleInputChange('boxes', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
                        <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Weight (lbs)</label><input value={editingOrder.weight} onChange={e => handleInputChange('weight', e.target.value)} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
