@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { 
   Search,
   Plus,
@@ -28,17 +29,19 @@ import {
 } from "lucide-react";
 
 // --- Supabase Setup ---
-// NOTA: Reemplaza estas credenciales con las de tu proyecto en Supabase
-const SUPABASE_URL = typeof process !== 'undefined' && process.env.VITE_SUPABASE_URL ? process.env.VITE_SUPABASE_URL : 'https://TU_PROYECTO.supabase.co';
-const SUPABASE_ANON_KEY = typeof process !== 'undefined' && process.env.VITE_SUPABASE_ANON_KEY ? process.env.VITE_SUPABASE_ANON_KEY : 'TU_CLAVE_ANONIMA';
+// NOTA: Crea un archivo .env.local en la raíz del proyecto con estas variables.
+// Ejemplo: VITE_SUPABASE_URL=https://xxxx.supabase.co
+//          VITE_SUPABASE_ANON_KEY=eyJhbGci...
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-const IS_PLACEHOLDER_CREDENTIALS = SUPABASE_URL === 'https://TU_PROYECTO.supabase.co';
+// Si no hay credenciales reales, la app usará datos de demostración locales.
+const IS_PLACEHOLDER_CREDENTIALS = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 
-declare global {
-  interface Window {
-    supabase: any;
-  }
-}
+// Inicializa el cliente de Supabase sólo si las credenciales están disponibles.
+const supabase: SupabaseClient | null = IS_PLACEHOLDER_CREDENTIALS
+  ? null
+  : createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
 
 // --- Constants ---
 const LOOM_SIZES = ["15000", "4200", "25000", "8500"];
@@ -160,9 +163,6 @@ const getMockOrders = (): Order[] => {
 export default function App() {
   // --- Auth State ---
   const [currentUser, setCurrentUser] = useState<string | null>(null);
-  
-  // --- Supabase Client State ---
-  const [supabaseClient, setSupabaseClient] = useState<any>(null);
 
   // --- Main State: Single Master List ---
   const [orders, setOrders] = useState<Order[]>([]);
@@ -178,7 +178,7 @@ export default function App() {
   // --- Edit States ---
   const [isQuickEditOpen, setIsQuickEditOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
-  const [activeOrderContext, setActiveOrderContext] = useState<EditContext | null>(null);
+  const [_activeOrderContext, setActiveOrderContext] = useState<EditContext | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
   
   // --- Pallet Form States ---
@@ -201,101 +201,58 @@ export default function App() {
   const [printTargetPallet, setPrintTargetPallet] = useState<PalletItem | null>(null);
   const [reportDate, setReportDate] = useState(getTodayUSFormat());
 
-  // --- Initialization and Supabase Loading ---
+  // --- Fetch Data & Setup Real-time Subscription ---
   useEffect(() => {
+    // Si no hay credenciales, usamos datos de demostración locales
     if (IS_PLACEHOLDER_CREDENTIALS) {
-      console.warn("Supabase credentials are placeholders. Bypassing script load to avoid network errors in preview.");
-      return;
-    }
-
-    if (window.supabase) {
-      setSupabaseClient(window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY));
-      return;
-    }
-
-    const existingScript = document.querySelector('script[src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"]');
-    if (existingScript) {
-      existingScript.addEventListener('load', () => {
-        if (window.supabase) {
-          setSupabaseClient(window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY));
-        }
-      });
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
-    script.onload = () => {
-      if (window.supabase) {
-        setSupabaseClient(window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY));
-      }
-    };
-    document.head.appendChild(script);
-  }, []);
-
-  // --- Fetch Data & Setup Subscription once client is ready ---
-  useEffect(() => {
-    if (IS_PLACEHOLDER_CREDENTIALS) {
-      // Use mock data immediately if we are using placeholder credentials
       setOrders(getMockOrders());
       setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true, "12/25/2026": true }));
       setExpandedTrucks(prev => ({ ...prev, [`${getTodayUSFormat()}-Truck 1`]: true }));
       return;
     }
 
-    if (!supabaseClient) return;
-
     const fetchOrders = async () => {
       try {
-        const { data, error } = await supabaseClient.from('orders').select('*');
-        
-        if (error) {
-          throw error;
-        }
+        const { data, error } = await supabase!.from('orders').select('*');
+        if (error) throw error;
 
         if (data && data.length > 0) {
           setOrders(data as Order[]);
           setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true }));
         } else {
-          // Inicializar con Mock Data si la BD está vacía (para demostración)
-          setOrders(prev => {
-            if (prev.length === 0) return getMockOrders();
-            return prev;
-          });
+          // BD vacía: cargar datos de ejemplo para demostración
+          setOrders(prev => (prev.length === 0 ? getMockOrders() : prev));
           setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true, "12/25/2026": true }));
           setExpandedTrucks(prev => ({ ...prev, [`${getTodayUSFormat()}-Truck 1`]: true }));
         }
-      } catch (error) {
-        console.error("Error al obtener datos de Supabase:", error);
-        // Fallback a Mock Data si falla la conexión a Supabase
-        setOrders(prev => {
-          if (prev.length === 0) return getMockOrders();
-          return prev;
-        });
+      } catch (err) {
+        console.error("Error al obtener datos de Supabase:", err);
+        // Fallback a datos locales si Supabase no responde
+        setOrders(prev => (prev.length === 0 ? getMockOrders() : prev));
         setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true, "12/25/2026": true }));
       }
     };
 
     fetchOrders();
 
-    // Suscripción a cambios en tiempo real en la tabla orders
-    const channel = supabaseClient
+    // Suscripción a cambios en tiempo real en la tabla "orders"
+    const channel = supabase!
       .channel('public:orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        fetchOrders(); // Recargar datos ante cualquier cambio
+        fetchOrders();
       })
       .subscribe();
 
     return () => {
-      supabaseClient.removeChannel(channel);
+      supabase!.removeChannel(channel);
     };
-  }, [supabaseClient]);
+  }, []);
 
   const saveOrderToCloud = async (order: Order) => {
-    if (!supabaseClient || IS_PLACEHOLDER_CREDENTIALS) return;
+    if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
     try {
       // Upsert: Inserta si no existe, actualiza si ya existe basándose en el ID
-      const { error } = await supabaseClient.from('orders').upsert(order, { onConflict: 'id' });
+      const { error } = await supabase.from('orders').upsert(order, { onConflict: 'id' });
       if (error) throw error;
     } catch (err) {
       console.error("Error guardando orden en Supabase:", err);
@@ -303,9 +260,9 @@ export default function App() {
   };
 
   const deleteOrderFromCloud = async (orderId: string) => {
-    if (!supabaseClient || IS_PLACEHOLDER_CREDENTIALS) return;
+    if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
     try {
-      const { error } = await supabaseClient.from('orders').delete().eq('id', orderId);
+      const { error } = await supabase.from('orders').delete().eq('id', orderId);
       if (error) throw error;
     } catch (err) {
       console.error("Error eliminando orden en Supabase:", err);
@@ -1429,7 +1386,7 @@ export default function App() {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-gray-100">
-                                {pallet.items.map((item, idx) => (
+                                {pallet.items.map((item, _idx) => (
                                   <tr key={item.id} className="bg-white">
                                     <td className="px-4 py-3 text-gray-700 font-bold">{item.lineNo}</td>
                                     <td className="px-4 py-3 text-gray-700">{item.itemNumber}</td>
