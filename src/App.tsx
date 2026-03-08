@@ -377,7 +377,7 @@ export default function App() {
   useEffect(() => {
     if (!editingOrder) return;
     // If ID changed in Quick Edit, skip auto-save — explicit Save button handles it
-    if (isQuickEditOpen && editingOrder.id !== activeOrderContext.orderId) return;
+    if (isQuickEditOpen && editingOrder.id !== _activeOrderContext?.orderId) return;
 
     let finalOrder = { ...editingOrder };
     let updatedTotals = false;
@@ -584,13 +584,14 @@ export default function App() {
 
   const handleQuickEditSave = async () => {
     if (!editingOrder) return;
-    const originalId = activeOrderContext.orderId;
-    if (editingOrder.id !== originalId && editingOrder.id.trim()) {
+    const originalId = _activeOrderContext?.orderId ?? '';
+    const newId = editingOrder.id.trim();
+    if (newId && newId !== originalId) {
       // ID changed: remove old, insert new
-      setOrders(prev => prev.filter(o => o.id !== originalId).concat({ ...editingOrder, id: editingOrder.id.trim() }));
-      await deleteOrderFromCloud(originalId);
-      await saveOrderToCloud({ ...editingOrder, id: editingOrder.id.trim() });
-      setActiveOrderContext({ orderId: editingOrder.id.trim() });
+      setOrders(prev => prev.filter(o => o.id !== originalId).concat({ ...editingOrder, id: newId }));
+      if (originalId) await deleteOrderFromCloud(originalId);
+      await saveOrderToCloud({ ...editingOrder, id: newId });
+      setActiveOrderContext({ orderId: newId });
     }
     closeAndNavigateSummary();
   };
@@ -1981,8 +1982,8 @@ export default function App() {
               <div className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Order #</label>
-                  <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-blue-500 font-bold ${editingOrder.id !== activeOrderContext.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
-                  {editingOrder.id !== activeOrderContext.orderId && <p className="text-[11px] text-amber-600 mt-1">Order # changed — click Save to apply.</p>}
+                  <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-blue-500 font-bold ${editingOrder.id !== _activeOrderContext?.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
+                  {editingOrder.id !== _activeOrderContext?.orderId && <p className="text-[11px] text-amber-600 mt-1">Order # changed — click Save to apply.</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Date <span className="text-red-500">*</span></label>
