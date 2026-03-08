@@ -674,7 +674,7 @@ export default function App() {
       <div 
         key={order.id} 
         onClick={() => openFullDetails(order)}
-        className={`bg-white rounded-2xl border-2 transition-all w-full sm:w-[320px] flex-shrink-0 hover:shadow-xl hover:border-indigo-400 cursor-pointer relative overflow-hidden group ${isDelayed ? 'border-red-100 shadow-red-50' : 'border-slate-100'}`}
+        className={`rounded-2xl border-2 transition-all w-full sm:w-[320px] flex-shrink-0 hover:shadow-xl cursor-pointer relative overflow-hidden group ${isDelayed ? 'bg-red-50/60 border-red-200 hover:border-red-400' : isCompleted ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-amber-50/40 border-amber-200 hover:border-indigo-400'}`}
       >
         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isCompleted ? 'bg-emerald-500' : isDelayed ? 'bg-red-500' : 'bg-amber-500'}`} />
         <div className="p-5">
@@ -980,22 +980,23 @@ export default function App() {
   // -------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-[#fcfdfe] font-sans text-slate-900 selection:bg-indigo-100">
-      <header className="bg-white border-b sticky top-0 z-30 px-8 flex justify-between items-center h-16 shadow-sm">
-        <div className="flex items-center gap-12 h-full">
-          <h1 className="text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
-          <nav className="flex h-full items-center gap-1">
-            {[
-              { id: "Order Summary", icon: <List className="w-4 h-4"/>, label: "Order Summary" },
-              { id: "Create Order", icon: <Plus className="w-4 h-4"/>, label: "Create Order" },
-              { id: "Truck Report", icon: <TruckIcon className="w-4 h-4"/>, label: "Truck Report" }
-            ].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-indigo-600 text-indigo-600 bg-indigo-50/30" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}>
-                {tab.icon} {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-        <div className="flex items-center gap-4">
+      <header className="bg-white border-b sticky top-0 z-30 px-8 flex items-center h-16 shadow-sm relative">
+        {/* Logo — izquierda */}
+        <h1 className="text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
+        {/* Nav — centrado absolutamente */}
+        <nav className="absolute left-1/2 -translate-x-1/2 flex h-full items-center gap-1">
+          {[
+            { id: "Order Summary", icon: <List className="w-4 h-4"/>, label: "Order Summary" },
+            { id: "Create Order", icon: <Plus className="w-4 h-4"/>, label: "Create Order" },
+            { id: "Truck Report", icon: <TruckIcon className="w-4 h-4"/>, label: "Truck Report" }
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-indigo-600 text-indigo-600 bg-indigo-50/30" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}>
+              {tab.icon} {tab.label}
+            </button>
+          ))}
+        </nav>
+        {/* Usuario — derecha */}
+        <div className="ml-auto flex items-center gap-4">
           <span className="text-sm font-medium text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></span>
           <button onClick={() => setCurrentUser(null)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all" title="Log out"><LogOut className="w-5 h-5" /></button>
         </div>
@@ -1029,12 +1030,21 @@ export default function App() {
             <section>
               <h2 className="text-xl font-black text-slate-900 mb-6 tracking-tight">Shipping Schedule</h2>
               <div className="space-y-8">
-                {activeDates.map(dg => (
+                {activeDates.map(dg => {
+                  // Conteo de órdenes completadas vs pendientes por fecha
+                  const allOrdersInDate = dg.trucks.flatMap(t => t.orders);
+                  const completedCount = allOrdersInDate.filter(o => o.status === 'Completed').length;
+                  const pendingCount = allOrdersInDate.length - completedCount;
+                  return (
                   <div key={dg.date} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <button onClick={() => toggleDate(dg.date)} className="w-full flex items-center justify-between p-5 bg-slate-50/50 hover:bg-slate-100/50 transition-colors">
                       <div className="flex items-center gap-4">
                         <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><Calendar className="w-5 h-5 text-indigo-600"/></div>
                         <span className="text-base font-bold text-slate-700">Scheduled for {dg.date}</span>
+                        <div className="flex items-center gap-2">
+                          {completedCount > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{completedCount} Done</span>}
+                          {pendingCount > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{pendingCount} Pending</span>}
+                        </div>
                       </div>
                       <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${expandedDates[dg.date] ? 'rotate-180' : ''}`} />
                     </button>
@@ -1064,7 +1074,8 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
 
@@ -1260,8 +1271,9 @@ export default function App() {
                   <div className="p-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-5">
                       <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Order Number <span className="text-red-500">*</span></label>
-                        <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm outline-none focus:border-blue-500 font-bold" />
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">Order Number</label>
+                        {/* ID es la llave primaria — solo lectura para evitar crear duplicados en Supabase */}
+                        <input value={editingOrder.id} readOnly className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm font-bold text-slate-600 cursor-not-allowed" />
                       </div>
                       <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">PO (Purchase Order)</label>
@@ -1654,15 +1666,6 @@ export default function App() {
             </div>
             
             <div className="p-5 overflow-y-auto flex-1">
-              <div className="mb-4">
-                <label className="block text-[13px] font-bold text-gray-700 mb-1.5">Pallet Weight (lbs)</label>
-                <input 
-                  value={editingOrder.palletList?.find(p => p.id === editingPalletId)?.weight || ""} 
-                  onChange={e => setEditingOrder({...editingOrder, palletList: editingOrder.palletList?.map(p => p.id === editingPalletId ? {...p, weight: e.target.value} : p)})} 
-                  className="w-full bg-white border border-gray-300 rounded p-2 text-[13px] outline-none focus:border-blue-500" 
-                />
-              </div>
-              
               <div className="mb-4">
                 <label className="block text-[13px] font-bold text-gray-700 mb-1.5">Items on Pallet</label>
                 <div className="bg-white border border-gray-300 rounded p-2 max-h-48 overflow-y-auto space-y-2">
