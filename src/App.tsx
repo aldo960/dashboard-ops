@@ -1046,7 +1046,7 @@ export default function App() {
   // RENDER: MAIN APPLICATION
   // -------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#fcfdfe] font-sans text-slate-900 selection:bg-indigo-100">
+    <div className="min-h-screen bg-[#eef0f3] font-sans text-slate-900 selection:bg-indigo-100">
       <header className="bg-white border-b sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm relative">
         {/* Logo */}
         <h1 className="text-lg sm:text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
