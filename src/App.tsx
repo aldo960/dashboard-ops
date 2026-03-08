@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { 
   Search,
   Plus,
@@ -11,10 +11,7 @@ import {
   Pencil,
   Trash2,
   X,
-  Save,
-  Box,
   ChevronDown,
-  ChevronRight,
   ArrowLeft,
   AlertTriangle,
   Archive,
@@ -24,10 +21,7 @@ import {
   Tag,
   ArrowRightLeft,
   Database,
-  Layers,
   Calendar,
-  ClipboardList,
-  Settings,
   Info,
   Package,
   User
