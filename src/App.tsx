@@ -196,6 +196,7 @@ export default function App() {
   // --- Concurrent Edit Conflict ---
   const [editConflict, setEditConflict] = useState(false);
   const editingOrderRef = useRef<Order | null>(null);
+  const isSavingRef = useRef(false);
   useEffect(() => { editingOrderRef.current = editingOrder; }, [editingOrder]);
 
   // --- Pallet Form States ---
@@ -269,9 +270,9 @@ export default function App() {
     const channel = supabase!
       .channel('public:orders')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
-        // Detectar conflicto: alguien más editó la orden que estamos viendo
+        // Solo mostrar conflicto si fue OTRO usuario quien guardó (no yo mismo)
         const incoming = payload.new as Order;
-        if (editingOrderRef.current && incoming.id === editingOrderRef.current.id) {
+        if (editingOrderRef.current && incoming.id === editingOrderRef.current.id && !isSavingRef.current) {
           setEditConflict(true);
         }
         fetchOrders();
@@ -291,12 +292,15 @@ export default function App() {
 
   const saveOrderToCloud = async (order: Order) => {
     if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
+    isSavingRef.current = true;
     try {
-      // Upsert: Inserta si no existe, actualiza si ya existe basándose en el ID
       const { error } = await supabase.from('orders').upsert(order, { onConflict: 'id' });
       if (error) throw error;
     } catch (err) {
       console.error("Error guardando orden en Supabase:", err);
+    } finally {
+      // Delay para que el evento real-time llegue mientras isSaving sigue activo
+      setTimeout(() => { isSavingRef.current = false; }, 1500);
     }
   };
 
@@ -755,11 +759,11 @@ export default function App() {
 
           <div className="space-y-1.5 text-[13px] text-slate-500 border-t border-slate-100 pt-4">
             <div className="flex justify-between"><span className="font-medium">PO:</span> <span className="text-slate-800 font-bold">{order.po || "N/A"}</span></div>
-            <div className="flex justify-between"><span className="font-medium">Truck:</span> <span className="text-indigo-600 font-bold">{order.truckId || "Unassigned"}</span></div>
+            <div className="flex justify-between"><span className="font-medium">Truck:</span> <span className="text-blue-600 font-bold">{order.truckId || "Unassigned"}</span></div>
             <div className="flex gap-3 mt-3">
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Plts</p><p className="font-black text-slate-900">{totalP} {order.loomPallets ? <span className="text-[10px] text-gray-500 font-medium">({order.loomPallets} Lm)</span> : ""}</p></div>
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Boxes</p><p className="font-black text-slate-900">{order.boxes}</p></div>
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-indigo-600">{Number(order.weight||0).toFixed(0)}</p></div>
+               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-blue-600">{Number(order.weight||0).toFixed(0)}</p></div>
             </div>
           </div>
         </div>
@@ -1046,7 +1050,7 @@ export default function App() {
   // RENDER: MAIN APPLICATION
   // -------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#eef0f3] font-sans text-slate-900 selection:bg-indigo-100">
+    <div className="min-h-screen bg-[#c9cfd9] font-sans text-slate-900 selection:bg-indigo-100">
       <header className="bg-white border-b sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm relative">
         {/* Logo */}
         <h1 className="text-lg sm:text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
@@ -1148,7 +1152,7 @@ export default function App() {
                               <div className="flex gap-4 text-[10px] font-bold text-slate-400">
                                 <span>{t.summary.pallets} Plts</span>
                                 <span>{t.summary.boxes} Bxs</span>
-                                <span className="text-indigo-600 font-black">{t.summary.weight} LBS</span>
+                                <span className="text-blue-600 font-black">{t.summary.weight} LBS</span>
                               </div>
                             </div>
                             {expandedTrucks[`${dg.date}-${t.id}`] && (
@@ -1474,7 +1478,7 @@ export default function App() {
                     {editingOrder.palletList?.map(pallet => {
                       const isLoom = isLoomPallet(pallet);
                       return (
-                      <div key={pallet.id} className={`bg-white border ${isLoom ? 'border-purple-300' : 'border-gray-300'} rounded-md shadow-sm overflow-hidden`}>
+                      <div key={pallet.id} className={`bg-white border ${isLoom ? 'border-purple-300' : 'border-gray-300'} rounded-md shadow-sm`}>
                         <div className={`p-4 flex justify-between items-center transition-colors ${isLoom ? 'bg-purple-50 hover:bg-purple-100' : 'bg-white hover:bg-gray-50'}`}>
                           <div className="flex items-center gap-6">
                             <span className={`font-bold text-[15px] ${isLoom ? 'text-purple-700' : 'text-[#1e6acb]'}`}>Pallet {pallet.number} {isLoom && <span className="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded ml-2">LOOM</span>}</span>
