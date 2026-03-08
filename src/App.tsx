@@ -42,7 +42,9 @@ const IS_PLACEHOLDER_CREDENTIALS = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 // Inicializa el cliente de Supabase sólo si las credenciales están disponibles.
 const supabase: SupabaseClient | null = IS_PLACEHOLDER_CREDENTIALS
   ? null
-  : createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
+  : createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+      auth: { persistSession: false }
+    });
 
 // --- Constants ---
 const LOOM_SIZES = ["15000", "4200", "25000", "8500"];
