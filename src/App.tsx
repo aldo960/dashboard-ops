@@ -142,6 +142,13 @@ const parseDateStr = (dateStr: string) => {
   return new Date(dateStr);
 };
 
+// Formatea "MM/DD/YYYY" → "March 11, 2026"
+const formatDateLong = (usDate: string) => {
+  const d = parseDateStr(usDate);
+  if (isNaN(d.getTime())) return usDate;
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
 const isLoomPallet = (p: PalletItem) => {
   return p.items.some(i => i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox)));
 };
@@ -496,7 +503,8 @@ export default function App() {
   };
 
   const openFullDetails = (order: Order) => {
-    setEditingOrder({ ...order });
+    // Deep copy para evitar que referencias compartidas contaminen otras órdenes
+    setEditingOrder(JSON.parse(JSON.stringify(order)));
     setActiveOrderContext({ orderId: order.id });
     setDetailsTab('general');
     setActiveTab("Order Details");
@@ -504,14 +512,18 @@ export default function App() {
   };
 
   const openQuickEdit = (order: Order) => {
-    setEditingOrder({ ...order });
+    setEditingOrder(JSON.parse(JSON.stringify(order)));
     setActiveOrderContext({ orderId: order.id });
     setIsQuickEditOpen(true);
   };
 
   const closeAndNavigateSummary = () => {
     setIsQuickEditOpen(false);
-    if (activeTab === "Order Details") setActiveTab("Order Summary");
+    // Limpiar editingOrder al salir para que no contamine la siguiente orden
+    if (activeTab === "Order Details") {
+      setEditingOrder(null);
+      setActiveTab("Order Summary");
+    }
   };
 
   const handleInputChange = (field: keyof Order, value: any) => {
@@ -761,7 +773,7 @@ export default function App() {
 
         {/* PALLET SHEETS */}
         {(printMode === 'pallet_sheets_all' && editingOrder?.palletList) && editingOrder.palletList.map(pallet => (
-          <div key={pallet.id} className="sheet-page p-10 font-sans mx-auto max-w-[8.5in] min-h-[11in] border-b border-gray-300 print:border-none">
+          <div key={pallet.id} className="sheet-page p-10 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
             <h1 className="text-center text-2xl font-bold mb-8">Pallet Details: Pallet {pallet.number} {isLoomPallet(pallet) ? '(Loom)' : ''}</h1>
             <div className="border border-gray-300 p-5 rounded-lg mb-8 bg-gray-50">
               <p className="mb-1"><b>Order #:</b> {editingOrder.id}</p>
@@ -782,7 +794,7 @@ export default function App() {
           </div>
         ))}
         {(printMode === 'pallet_sheet_single' && printTargetPallet) && (
-          <div className="sheet-page p-10 font-sans mx-auto max-w-[8.5in] min-h-[11in] border-b border-gray-300 print:border-none">
+          <div className="sheet-page p-10 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
             <h1 className="text-center text-2xl font-bold mb-8">Pallet Details: Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h1>
             <div className="border border-gray-300 p-5 rounded-lg mb-8 bg-gray-50"><p className="mb-1"><b>Order #:</b> {editingOrder?.id}</p><p className="mb-1"><b>PO:</b> {editingOrder?.po}</p><p className="mb-1"><b>Ship Date:</b> {editingOrder?.shipmentDate}</p><p className="mb-1"><b>Pallet Weight:</b> {printTargetPallet.weight} lbs</p></div>
             <h3 className="text-lg font-bold mb-4">Items on Pallet</h3>
@@ -904,7 +916,7 @@ export default function App() {
         {printMode === 'truck_report' && (
           <div className="p-10 font-sans mx-auto max-w-[11in] sheet-page">
             <h1 className="text-center text-3xl font-bold mb-6 text-[#2c3e50]">Shipping Report</h1>
-            <h2 className="text-center text-xl font-bold mb-10">Date: {reportDate}</h2>
+            <h2 className="text-center text-xl font-bold mb-10">Date: {formatDateLong(reportDate)}</h2>
             
             {truckReportSummary.trucks.map(t => (
               <div key={t.id} className="mb-8">
@@ -935,7 +947,7 @@ export default function App() {
               </div>
             ))}
             
-            <h3 className="text-xl font-bold mt-12 mb-4">Grand Totals for {reportDate}</h3>
+            <h3 className="text-xl font-bold mt-12 mb-4">Grand Totals for {formatDateLong(reportDate)}</h3>
             <table className="w-full text-left border-collapse border border-gray-300">
                <thead>
                  <tr className="bg-gray-100">
@@ -1205,7 +1217,7 @@ export default function App() {
                     ))}
 
                     <div className="border border-gray-200 rounded-md p-6 mt-10">
-                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Calendar className="w-5 h-5"/> Totals for {reportDate}</h3>
+                       <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Calendar className="w-5 h-5"/> Totals for {formatDateLong(reportDate)}</h3>
                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                           <div className="bg-gray-50 p-4 rounded text-center border border-gray-100"><p className="text-xs font-bold text-gray-500 uppercase">Total Trucks</p><p className="text-2xl font-bold">{truckReportSummary.grandTrucks}</p></div>
                           <div className="bg-purple-50 p-4 rounded text-center border border-purple-200"><p className="text-xs font-bold text-purple-600 uppercase">Loom Pallets</p><p className="text-2xl font-bold text-purple-700">{truckReportSummary.grandLoomPlts}</p></div>
@@ -1228,7 +1240,7 @@ export default function App() {
         {activeTab === "Order Details" && editingOrder && (
           <div className="animate-in fade-in duration-300">
             <div className="flex justify-between items-center mb-6">
-              <button onClick={() => setActiveTab("Order Summary")} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><ArrowLeft className="w-4 h-4"/> Back to Dashboard</button>
+              <button onClick={() => { setEditingOrder(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><ArrowLeft className="w-4 h-4"/> Back to Dashboard</button>
               <div className="flex gap-2 flex-wrap justify-end">
                 <button onClick={() => setDetailsTab('general')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='general' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4"/> Order Details</button>
                 <button onClick={() => setDetailsTab('packing_list')} className={`px-4 py-1.5 rounded text-sm font-bold border flex items-center gap-2 ${detailsTab==='packing_list' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4"/> Packing List</button>
