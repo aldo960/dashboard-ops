@@ -195,6 +195,7 @@ export default function App() {
 
   // --- Concurrent Edit Conflict ---
   const [editConflict, setEditConflict] = useState(false);
+  const [mergeNotification, setMergeNotification] = useState(false);
   const editingOrderRef = useRef<Order | null>(null);
   const isSavingRef = useRef(false);
   useEffect(() => { editingOrderRef.current = editingOrder; }, [editingOrder]);
@@ -271,10 +272,13 @@ export default function App() {
     const channel = supabase!
       .channel('public:orders')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
-        // Solo mostrar conflicto si fue OTRO usuario quien guardó (no yo mismo)
         const incoming = payload.new as Order;
         if (editingOrderRef.current && incoming.id === editingOrderRef.current.id && !isSavingRef.current) {
-          setEditConflict(true);
+          // Auto-merge: keep local pallets/items + incoming pallets/items, no conflict banner needed
+          const merged = mergeOrders(incoming, editingOrderRef.current);
+          setEditingOrder(merged);
+          setMergeNotification(true);
+          setTimeout(() => setMergeNotification(false), 3500);
         }
         fetchOrders();
       })
@@ -290,6 +294,20 @@ export default function App() {
       supabase!.removeChannel(channel);
     };
   }, []);
+
+  // Merges two versions of an order: keeps all pallets/items from both, other fields from incoming
+  const mergeOrders = (incoming: Order, local: Order): Order => {
+    const incomingPalletIds = new Set((incoming.palletList || []).map(p => p.id));
+    const localOnlyPallets = (local.palletList || []).filter(p => !incomingPalletIds.has(p.id));
+    const mergedPallets = [...(incoming.palletList || []), ...localOnlyPallets]
+      .map((p, i) => ({ ...p, number: i + 1 }));
+
+    const incomingItemIds = new Set((incoming.masterItems || []).map(m => m.id));
+    const localOnlyItems = (local.masterItems || []).filter(m => !incomingItemIds.has(m.id));
+    const mergedItems = [...(incoming.masterItems || []), ...localOnlyItems];
+
+    return { ...incoming, palletList: mergedPallets, masterItems: mergedItems };
+  };
 
   const saveOrderToCloud = async (order: Order) => {
     if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
@@ -1391,25 +1409,11 @@ export default function App() {
               </div>
             </div>
 
-            {/* Banner de conflicto de edición simultánea */}
-            {editConflict && (
-              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-amber-800 text-sm font-medium">
-                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0"/>
-                  Another user saved changes to this order while you were editing.
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button onClick={() => {
-                    const latest = orders.find(o => o.id === editingOrder?.id);
-                    if (latest) setEditingOrder(JSON.parse(JSON.stringify(latest)));
-                    setEditConflict(false);
-                  }} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded">
-                    Reload Latest
-                  </button>
-                  <button onClick={() => setEditConflict(false)} className="px-3 py-1.5 bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 text-xs font-bold rounded">
-                    Keep Mine
-                  </button>
-                </div>
+            {/* Notificación de auto-merge */}
+            {mergeNotification && (
+              <div className="bg-emerald-50 border border-emerald-300 rounded-lg px-4 py-3 mb-5 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0"/>
+                <span className="text-emerald-800 text-sm font-medium">Changes from the other user were automatically merged into your session.</span>
               </div>
             )}
 
