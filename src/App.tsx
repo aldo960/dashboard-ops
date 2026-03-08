@@ -376,7 +376,9 @@ export default function App() {
   // --- Auto-Save Effect (Updates UI locally instantly) ---
   useEffect(() => {
     if (!editingOrder) return;
-    
+    // If ID changed in Quick Edit, skip auto-save — explicit Save button handles it
+    if (isQuickEditOpen && editingOrder.id !== activeOrderContext.orderId) return;
+
     let finalOrder = { ...editingOrder };
     let updatedTotals = false;
 
@@ -580,8 +582,27 @@ export default function App() {
     }
   };
 
+  const handleQuickEditSave = async () => {
+    if (!editingOrder) return;
+    const originalId = activeOrderContext.orderId;
+    if (editingOrder.id !== originalId && editingOrder.id.trim()) {
+      // ID changed: remove old, insert new
+      setOrders(prev => prev.filter(o => o.id !== originalId).concat({ ...editingOrder, id: editingOrder.id.trim() }));
+      await deleteOrderFromCloud(originalId);
+      await saveOrderToCloud({ ...editingOrder, id: editingOrder.id.trim() });
+      setActiveOrderContext({ orderId: editingOrder.id.trim() });
+    }
+    closeAndNavigateSummary();
+  };
+
   const handleInputChange = (field: keyof Order, value: any) => {
-    if (editingOrder) setEditingOrder({ ...editingOrder, [field]: value });
+    if (!editingOrder) return;
+    const updated = { ...editingOrder, [field]: value };
+    // Keep pallets in sync with normalPallets + loomPallets when override is on
+    if ((field === 'normalPallets' || field === 'loomPallets') && updated.isManualOverride) {
+      updated.pallets = (Number(updated.normalPallets) || 0) + (Number(updated.loomPallets) || 0);
+    }
+    setEditingOrder(updated);
   };
 
   const handleOrderCheckKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -761,6 +782,7 @@ export default function App() {
           <div className="space-y-1.5 text-[13px] text-slate-500 border-t border-slate-100 pt-4">
             <div className="flex justify-between"><span className="font-medium">PO:</span> <span className="text-slate-800 font-bold">{order.po || "N/A"}</span></div>
             <div className="flex justify-between"><span className="font-medium">Truck:</span> <span className="text-slate-800 font-bold">{order.truckId || "Unassigned"}</span></div>
+            {order.notes && <p className="text-[12px] text-slate-500 italic border-t border-slate-100 pt-2 mt-1 line-clamp-2">{order.notes}</p>}
             <div className="flex gap-3 mt-3">
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Plts</p><p className="font-black text-slate-900">{totalP} {order.loomPallets ? <span className="text-[10px] text-gray-500 font-medium">({order.loomPallets} Lm)</span> : ""}</p></div>
                <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Boxes</p><p className="font-black text-slate-900">{order.boxes}</p></div>
@@ -1958,6 +1980,11 @@ export default function App() {
               </div>
               <div className="p-6 space-y-4">
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Order #</label>
+                  <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-blue-500 font-bold ${editingOrder.id !== activeOrderContext.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
+                  {editingOrder.id !== activeOrderContext.orderId && <p className="text-[11px] text-amber-600 mt-1">Order # changed — click Save to apply.</p>}
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Date <span className="text-red-500">*</span></label>
                   <input type="date" value={formatForInput(editingOrder.shipmentDate || "")} onChange={e => handleInputChange('shipmentDate', formatFromInput(e.target.value))} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" />
                 </div>
@@ -2006,6 +2033,7 @@ export default function App() {
               </div>
               <div className="p-4 border-t border-gray-200 bg-white rounded-b-md flex justify-end gap-3">
                 <button onClick={closeAndNavigateSummary} className="px-4 py-2 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50">Close</button>
+                <button onClick={handleQuickEditSave} className="px-4 py-2 bg-[#1e6acb] text-white rounded text-sm font-bold hover:bg-blue-700">Save</button>
               </div>
             </div>
          </div>
