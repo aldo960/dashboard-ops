@@ -194,7 +194,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // --- Concurrent Edit Merge ---
-  const [mergeNotification, setMergeNotification] = useState(false);
+  const [pendingRemoteUpdate, setPendingRemoteUpdate] = useState<Order | null>(null);
   const editingOrderRef = useRef<Order | null>(null);
   const isSavingRef = useRef(false);
   useEffect(() => { editingOrderRef.current = editingOrder; }, [editingOrder]);
@@ -273,11 +273,8 @@ export default function App() {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
         const incoming = payload.new as Order;
         if (editingOrderRef.current && incoming.id === editingOrderRef.current.id && !isSavingRef.current) {
-          // Auto-merge: keep local pallets/items + incoming pallets/items, no conflict banner needed
-          const merged = mergeOrders(incoming, editingOrderRef.current);
-          setEditingOrder(merged);
-          setMergeNotification(true);
-          setTimeout(() => setMergeNotification(false), 3500);
+          // Solo avisa — el usuario decide cuándo fusionar
+          setPendingRemoteUpdate(incoming);
         }
         fetchOrders();
       })
@@ -318,7 +315,7 @@ export default function App() {
       console.error("Error guardando orden en Supabase:", err);
     } finally {
       // Delay para que el evento real-time llegue mientras isSaving sigue activo
-      setTimeout(() => { isSavingRef.current = false; }, 1500);
+      setTimeout(() => { isSavingRef.current = false; }, 3000);
     }
   };
 
@@ -590,6 +587,7 @@ export default function App() {
 
   const closeAndNavigateSummary = () => {
     setIsQuickEditOpen(false);
+    setPendingRemoteUpdate(null);
     // Limpiar editingOrder al salir para que no contamine la siguiente orden
     if (activeTab === "Order Details") {
       setEditingOrder(null);
@@ -1396,7 +1394,7 @@ export default function App() {
         {activeTab === "Order Details" && editingOrder && (
           <div className="animate-in fade-in duration-300">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-              <button onClick={() => { setEditingOrder(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
+              <button onClick={() => { setEditingOrder(null); setPendingRemoteUpdate(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
               <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
                 <button onClick={() => setDetailsTab('general')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='general' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4 shrink-0"/> <span className="hidden xs:inline">Order </span>Details</button>
                 <button onClick={() => setDetailsTab('packing_list')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='packing_list' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4 shrink-0"/> Packing</button>
@@ -1406,11 +1404,26 @@ export default function App() {
               </div>
             </div>
 
-            {/* Notificación de auto-merge */}
-            {mergeNotification && (
-              <div className="bg-emerald-50 border border-emerald-300 rounded-lg px-4 py-3 mb-5 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0"/>
-                <span className="text-emerald-800 text-sm font-medium">Changes from the other user were automatically merged into your session.</span>
+            {/* Botón de fusión manual — solo aparece cuando el compañero editó esta misma orden */}
+            {pendingRemoteUpdate && (
+              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0"/>
+                  <span className="text-amber-800 text-sm font-medium">Tu compañero guardó cambios en esta orden.</span>
+                </div>
+                <button
+                  onClick={() => {
+                    if (!editingOrder || !pendingRemoteUpdate) return;
+                    setEditingOrder(mergeOrders(pendingRemoteUpdate, editingOrder));
+                    setPendingRemoteUpdate(null);
+                  }}
+                  className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded hover:bg-amber-700 whitespace-nowrap"
+                >
+                  Incorporar cambios
+                </button>
+                <button onClick={() => setPendingRemoteUpdate(null)} className="text-amber-500 hover:text-amber-700 text-xs underline whitespace-nowrap">
+                  Ignorar
+                </button>
               </div>
             )}
 
