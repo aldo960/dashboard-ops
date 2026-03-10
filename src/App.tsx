@@ -173,18 +173,15 @@ const getMockOrders = (): Order[] => {
 function PacManScene({ className = "" }: { className?: string }) {
   const gp = (x: number, y: number) =>
     `M ${x},${y+14} L ${x},${y+5} Q ${x},${y} ${x+5},${y} Q ${x+10},${y} ${x+10},${y+5} L ${x+10},${y+14} Q ${x+8.5},${y+12} ${x+6.7},${y+14} Q ${x+5},${y+12} ${x+3.3},${y+14} Q ${x+1.7},${y+12} ${x},${y+14} Z`;
-  const open = "M 75,11 L 83.7,8.7 A 9,9 0 1,0 83.7,13.3 Z";
-  const shut = "M 75,11 L 84,10.7 A 9,9 0 1,0 84,11.3 Z";
   const ghosts = [
-    { x: 0, color: "#FF0000", delay: "0s" },
-    { x: 14, color: "#FFB8FF", delay: "0.15s" },
-    { x: 28, color: "#00FFFF", delay: "0.3s" },
+    { x: 0, color: "#FF0000" },
+    { x: 14, color: "#FFB8FF" },
+    { x: 28, color: "#00FFFF" },
   ];
   return (
     <svg viewBox="0 0 90 22" className={className} xmlns="http://www.w3.org/2000/svg">
-      {ghosts.map(({ x, color, delay }) => (
+      {ghosts.map(({ x, color }) => (
         <g key={x}>
-          <animateTransform attributeName="transform" type="translate" values="0,0;0,-1.5;0,0" dur="0.7s" begin={delay} repeatCount="indefinite" additive="replace"/>
           <path d={gp(x, 4)} fill={color}/>
           <circle cx={x+2.8} cy={9.5} r={1.9} fill="white"/>
           <circle cx={x+7.2} cy={9.5} r={1.9} fill="white"/>
@@ -195,9 +192,7 @@ function PacManScene({ className = "" }: { className?: string }) {
       {[40, 46, 52, 58, 64].map(cx => (
         <circle key={cx} cx={cx} cy={11} r={1.3} fill="#FFD700" opacity="0.85"/>
       ))}
-      <path fill="#FFD700">
-        <animate attributeName="d" values={`${open};${shut};${open}`} dur="0.4s" repeatCount="indefinite"/>
-      </path>
+      <path fill="#FFD700" d="M 75,11 L 66.3,8.7 A 9,9 0 1,1 66.3,13.3 Z"/>
     </svg>
   );
 }
