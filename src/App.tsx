@@ -26,7 +26,8 @@ import {
   Calendar,
   Info,
   Package,
-  User
+  User,
+  Copy
 } from "lucide-react";
 
 // --- Supabase Setup ---
@@ -199,6 +200,7 @@ export default function App() {
   const [pendingRemoteUpdate, setPendingRemoteUpdate] = useState<Order | null>(null);
   const editingOrderRef = useRef<Order | null>(null);
   const isSavingRef = useRef(false);
+  const savingCountRef = useRef(0);
   useEffect(() => { editingOrderRef.current = editingOrder; }, [editingOrder]);
 
   // --- Pallet Form States ---
@@ -296,7 +298,8 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Merges two versions of an order: keeps all pallets/items from both, other fields from incoming
+  // Merges two versions of an order: pallets/items combined from both,
+  // header fields (truck, notes, status, etc.) prefer LOCAL since user is actively editing.
   const mergeOrders = (incoming: Order, local: Order): Order => {
     const incomingPalletIds = new Set((incoming.palletList || []).map(p => p.id));
     const localOnlyPallets = (local.palletList || []).filter(p => !incomingPalletIds.has(p.id));
@@ -307,11 +310,14 @@ export default function App() {
     const localOnlyItems = (local.masterItems || []).filter(m => !incomingItemIds.has(m.id));
     const mergedItems = [...(incoming.masterItems || []), ...localOnlyItems];
 
-    return { ...incoming, palletList: mergedPallets, masterItems: mergedItems };
+    // Start with incoming (colleague's data), then override with local edits,
+    // then apply the merged pallet/item lists.
+    return { ...incoming, ...local, palletList: mergedPallets, masterItems: mergedItems };
   };
 
   const saveOrderToCloud = async (order: Order) => {
     if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
+    savingCountRef.current++;
     isSavingRef.current = true;
     try {
       const { error } = await supabase.from('orders').upsert(order, { onConflict: 'id' });
@@ -319,8 +325,12 @@ export default function App() {
     } catch (err) {
       console.error("Error guardando orden en Supabase:", err);
     } finally {
-      // Delay para que el evento real-time llegue mientras isSaving sigue activo
-      setTimeout(() => { isSavingRef.current = false; }, 3000);
+      // Espera a que llegue el evento real-time, luego decrementa.
+      // isSavingRef solo se apaga cuando TODOS los saves pendientes terminen.
+      setTimeout(() => {
+        savingCountRef.current = Math.max(0, savingCountRef.current - 1);
+        if (savingCountRef.current === 0) isSavingRef.current = false;
+      }, 6000);
     }
   };
 
@@ -338,9 +348,10 @@ export default function App() {
   const { activeDates, pastCompletedDates, delayedOrdersList } = useMemo(() => {
     const searchLower = searchTerm.toLowerCase();
     // 1. Filter by search
-    const filtered = orders.filter(o => 
-      (o.id || '').toLowerCase().includes(searchLower) || 
-      (o.po || '').toLowerCase().includes(searchLower)
+    const filtered = orders.filter(o =>
+      (o.id || '').toLowerCase().includes(searchLower) ||
+      (o.po || '').toLowerCase().includes(searchLower) ||
+      (o.masterItems || []).some(m => (m.itemNumber || '').toLowerCase().includes(searchLower))
     );
 
     // 2. Separate delayed
@@ -633,7 +644,16 @@ export default function App() {
     }
   };
 
-  const toggleDate = (date: string) => setExpandedDates(p => ({ ...p, [date]: !p[date] }));
+  const toggleDate = (date: string, trucks?: TruckData[]) => {
+    const isOpening = !expandedDates[date];
+    setExpandedDates(p => ({ ...p, [date]: !p[date] }));
+    // When expanding a date, also expand all its trucks automatically
+    if (isOpening && trucks && trucks.length > 0) {
+      const truckUpdates: Record<string, boolean> = {};
+      trucks.forEach(t => { truckUpdates[`${date}-${t.id}`] = true; });
+      setExpandedTrucks(p => ({ ...p, ...truckUpdates }));
+    }
+  };
   const toggleTruck = (date: string, tid: string) => setExpandedTrucks(p => ({ ...p, [`${date}-${tid}`]: !p[`${date}-${tid}`] }));
 
   // --- Master Items ---
@@ -794,7 +814,14 @@ export default function App() {
                 {isCompleted ? <CheckCircle2 className="w-3 h-3" /> : isDelayed ? <AlertCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
                 {order.status}
               </span>
-              <h3 className="text-slate-900 font-extrabold text-base group-hover:text-indigo-600 transition-colors">{order.id}</h3>
+              <div className="flex items-center gap-1.5">
+                <h3 className="text-slate-900 font-extrabold text-base group-hover:text-indigo-600 transition-colors">{order.id}</h3>
+                <button
+                  onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
+                  title="Copiar número de orden"
+                  className="p-0.5 text-slate-300 hover:text-indigo-500 transition-colors opacity-0 group-hover:opacity-100"
+                ><Copy className="w-3.5 h-3.5"/></button>
+              </div>
             </div>
             {!isReadOnly && (
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -887,7 +914,7 @@ export default function App() {
           <div key={p.id} className="label-page flex flex-col justify-center items-center text-center border-b border-gray-300 print:border-none" style={{ width: '4in', height: '2in', padding: '0.2in', boxSizing: 'border-box', fontFamily: 'sans-serif' }}>
             <h1 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Order: {editingOrder.id}</h1>
             <p style={{ margin: '0 0 8px 0', fontSize: '16px' }}>PO: {editingOrder.po || 'N/A'}</p>
-            <h2 style={{ margin: '0 0 5px 0', fontSize: '22px', fontWeight: 'bold' }}>Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</h2>
+            <h2 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</h2>
             <p style={{ margin: '0', fontSize: '14px' }}>Ship Date: {editingOrder.shipmentDate}</p>
           </div>
         ))}
@@ -895,7 +922,7 @@ export default function App() {
           <div className="label-page flex flex-col justify-center items-center text-center border-b border-gray-300 print:border-none" style={{ width: '4in', height: '2in', padding: '0.2in', boxSizing: 'border-box', fontFamily: 'sans-serif' }}>
             <h1 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Order: {editingOrder?.id}</h1>
             <p style={{ margin: '0 0 8px 0', fontSize: '16px' }}>PO: {editingOrder?.po || 'N/A'}</p>
-            <h2 style={{ margin: '0 0 5px 0', fontSize: '22px', fontWeight: 'bold' }}>Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h2>
+            <h2 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h2>
             <p style={{ margin: '0', fontSize: '14px' }}>Ship Date: {editingOrder?.shipmentDate}</p>
           </div>
         )}
@@ -1186,7 +1213,7 @@ export default function App() {
                   const pendingCount = allOrdersInDate.length - completedCount;
                   return (
                   <div key={dg.date} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <button onClick={() => toggleDate(dg.date)} className="w-full flex items-center justify-between p-5 bg-slate-50/50 hover:bg-slate-100/50 transition-colors">
+                    <button onClick={() => toggleDate(dg.date, dg.trucks)} className="w-full flex items-center justify-between p-5 bg-slate-50/50 hover:bg-slate-100/50 transition-colors">
                       <div className="flex items-center gap-4">
                         <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><Calendar className="w-5 h-5 text-indigo-600"/></div>
                         <span className="text-base font-bold text-slate-700">Scheduled for {dg.date}</span>
@@ -1238,7 +1265,7 @@ export default function App() {
                   {pastCompletedDates.map(dg => (
                     <div key={dg.date} className="bg-slate-50 rounded-2xl border border-slate-200 shadow-sm overflow-hidden grayscale hover:grayscale-0 transition-all">
                       <div className="flex items-center justify-between pr-4 hover:bg-slate-100/50 transition-colors">
-                        <button onClick={() => toggleDate(dg.date)} className="flex-1 flex items-center gap-4 p-5 text-left">
+                        <button onClick={() => toggleDate(dg.date, dg.trucks)} className="flex-1 flex items-center gap-4 p-5 text-left">
                           <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><CheckCircle2 className="w-5 h-5 text-emerald-600"/></div>
                           <span className="text-base font-bold text-slate-700">Completed on {dg.date}</span>
                           <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${expandedDates[dg.date] ? 'rotate-180' : ''}`} />
@@ -1425,26 +1452,31 @@ export default function App() {
               </div>
             </div>
 
-            {/* Botón de fusión manual — solo aparece cuando el compañero editó esta misma orden */}
+            {/* Botón de fusión manual — solo aparece cuando otro usuario editó esta misma orden */}
             {pendingRemoteUpdate && (
-              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 mb-5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0"/>
-                  <span className="text-amber-800 text-sm font-medium">Tu compañero guardó cambios en esta orden.</span>
+              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div className="flex items-start gap-2 flex-1">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5"/>
+                  <div>
+                    <p className="text-amber-800 text-sm font-bold">Tu compañero guardó cambios en esta orden.</p>
+                    <p className="text-amber-600 text-xs mt-0.5">Si eres tú mismo desde otro dispositivo, haz clic en <b>Ignorar</b>. Si es un compañero, usa <b>Incorporar</b> para unir sus cambios con los tuyos.</p>
+                  </div>
                 </div>
-                <button
-                  onClick={() => {
-                    if (!editingOrder || !pendingRemoteUpdate) return;
-                    setEditingOrder(mergeOrders(pendingRemoteUpdate, editingOrder));
-                    setPendingRemoteUpdate(null);
-                  }}
-                  className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded hover:bg-amber-700 whitespace-nowrap"
-                >
-                  Incorporar cambios
-                </button>
-                <button onClick={() => setPendingRemoteUpdate(null)} className="text-amber-500 hover:text-amber-700 text-xs underline whitespace-nowrap">
-                  Ignorar
-                </button>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      if (!editingOrder || !pendingRemoteUpdate) return;
+                      setEditingOrder(mergeOrders(pendingRemoteUpdate, editingOrder));
+                      setPendingRemoteUpdate(null);
+                    }}
+                    className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded hover:bg-amber-700 whitespace-nowrap"
+                  >
+                    Incorporar
+                  </button>
+                  <button onClick={() => setPendingRemoteUpdate(null)} className="px-3 py-1.5 border border-amber-400 text-amber-700 text-xs font-bold rounded hover:bg-amber-100 whitespace-nowrap">
+                    Ignorar (soy yo)
+                  </button>
+                </div>
               </div>
             )}
 
