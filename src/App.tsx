@@ -26,7 +26,6 @@ import {
   Calendar,
   Info,
   Package,
-  User,
   Copy
 } from "lucide-react";
 
@@ -169,6 +168,39 @@ const getMockOrders = (): Order[] => {
     { id: "ORD-1005", status: "In Progress", po: "PO-005", freight: "Prepaid", pallets: 8, normalPallets: 6, loomPallets: 2, boxes: 60, weight: "8500.00", shipmentDate: futureStr, truckId: "Truck 3", palletList: [], masterItems: [], isManualOverride: true }
   ];
 };
+
+// --- Pac-Man Scene Logo ---
+function PacManScene({ className = "" }: { className?: string }) {
+  const gp = (x: number, y: number) =>
+    `M ${x},${y+14} L ${x},${y+5} Q ${x},${y} ${x+5},${y} Q ${x+10},${y} ${x+10},${y+5} L ${x+10},${y+14} Q ${x+8.5},${y+12} ${x+6.7},${y+14} Q ${x+5},${y+12} ${x+3.3},${y+14} Q ${x+1.7},${y+12} ${x},${y+14} Z`;
+  const open = "M 75,11 L 83.7,8.7 A 9,9 0 1,0 83.7,13.3 Z";
+  const shut = "M 75,11 L 84,10.7 A 9,9 0 1,0 84,11.3 Z";
+  const ghosts = [
+    { x: 0, color: "#FF0000", delay: "0s" },
+    { x: 14, color: "#FFB8FF", delay: "0.15s" },
+    { x: 28, color: "#00FFFF", delay: "0.3s" },
+  ];
+  return (
+    <svg viewBox="0 0 90 22" className={className} xmlns="http://www.w3.org/2000/svg">
+      {ghosts.map(({ x, color, delay }) => (
+        <g key={x}>
+          <animateTransform attributeName="transform" type="translate" values="0,0;0,-1.5;0,0" dur="0.7s" begin={delay} repeatCount="indefinite" additive="replace"/>
+          <path d={gp(x, 4)} fill={color}/>
+          <circle cx={x+2.8} cy={9.5} r={1.9} fill="white"/>
+          <circle cx={x+7.2} cy={9.5} r={1.9} fill="white"/>
+          <circle cx={x+3.5} cy={10} r={1} fill="#1a1aff"/>
+          <circle cx={x+7.9} cy={10} r={1} fill="#1a1aff"/>
+        </g>
+      ))}
+      {[40, 46, 52, 58, 64].map(cx => (
+        <circle key={cx} cx={cx} cy={11} r={1.3} fill="#FFD700" opacity="0.85"/>
+      ))}
+      <path fill="#FFD700">
+        <animate attributeName="d" values={`${open};${shut};${open}`} dur="0.4s" repeatCount="indefinite"/>
+      </path>
+    </svg>
+  );
+}
 
 // --- Main Component ---
 export default function App() {
@@ -804,13 +836,22 @@ export default function App() {
     // Auto-derive display status: "No empezada" if nothing has been added yet
     const isNotStarted = !hasWork && !isCompleted && !isDelayed;
     const displayStatus = isNotStarted ? 'Not Started' : order.status;
-    const accentColor = isCompleted ? 'bg-emerald-500' : isDelayed ? 'bg-red-500' : isNotStarted ? 'bg-slate-400' : 'bg-amber-500';
-    const cardBg = isCompleted ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400'
-      : isDelayed ? 'bg-red-50/60 border-red-200 hover:border-red-400'
-      : isNotStarted ? 'bg-slate-50/60 border-slate-200 hover:border-blue-400'
-      : 'bg-amber-50/40 border-amber-200 hover:border-blue-400';
-    const statusColor = isCompleted ? 'text-emerald-600' : isDelayed ? 'text-red-600' : isNotStarted ? 'text-slate-400' : 'text-amber-600';
+    const accentColor = isCompleted ? 'bg-emerald-400' : isDelayed ? 'bg-rose-400' : isNotStarted ? 'bg-gray-300' : 'bg-orange-400';
+    const cardBg = isCompleted
+      ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300 hover:shadow-md'
+      : isDelayed
+      ? 'bg-rose-50 border-rose-200 hover:border-rose-300 hover:shadow-md'
+      : isNotStarted
+      ? 'bg-gray-50 border-gray-200 hover:border-gray-300 hover:shadow-md'
+      : 'bg-orange-50 border-orange-200 hover:border-orange-300 hover:shadow-md';
+    const statPanelBg = isCompleted ? 'bg-emerald-100/60 border-l-emerald-200 divide-emerald-200'
+      : isDelayed ? 'bg-rose-100/60 border-l-rose-200 divide-rose-200'
+      : isNotStarted ? 'bg-gray-100/60 border-l-gray-200 divide-gray-200'
+      : 'bg-orange-100/60 border-l-orange-200 divide-orange-200';
+    const statLabel = isCompleted ? 'text-emerald-500' : isDelayed ? 'text-rose-400' : isNotStarted ? 'text-gray-400' : 'text-orange-400';
+    const statusColor = isCompleted ? 'text-emerald-600' : isDelayed ? 'text-rose-600' : isNotStarted ? 'text-gray-400' : 'text-orange-600';
     const StatusIcon = isCompleted ? CheckCircle2 : isDelayed ? AlertCircle : isNotStarted ? Archive : Clock;
+    const divider = isCompleted ? 'border-emerald-100' : isDelayed ? 'border-rose-100' : isNotStarted ? 'border-gray-100' : 'border-orange-100';
 
     const backorders = (!isReadOnly && checkOrderIncomplete(order)) ? getBackorders(order) : [];
 
@@ -818,57 +859,36 @@ export default function App() {
       <div
         key={order.id}
         onClick={() => openFullDetails(order)}
-        className={`rounded-2xl border-2 transition-all w-full sm:w-[320px] flex-shrink-0 hover:shadow-xl cursor-pointer relative overflow-hidden group ${cardBg}`}
+        className={`rounded-2xl border-2 transition-all w-full sm:w-[300px] flex-shrink-0 cursor-pointer overflow-hidden group flex ${cardBg}`}
       >
-        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${accentColor}`} />
+        {/* Left accent stripe */}
+        <div className={`w-[5px] shrink-0 ${accentColor}`} />
 
-        <div className="pl-4 pr-3 pt-3 pb-3">
-          {/* Row 1: status + stats + actions */}
-          <div className="flex items-start justify-between gap-2">
-            {/* Left: status + order id */}
-            <div className="min-w-0">
-              <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 mb-0.5 ${statusColor}`}>
-                <StatusIcon className="w-3 h-3 shrink-0" />
-                {displayStatus}
-              </span>
-              <div className="flex items-center gap-1">
-                <h3 className="text-slate-900 font-extrabold text-base leading-tight group-hover:text-blue-600 transition-colors truncate">{order.id}</h3>
-                <button
-                  onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
-                  title="Copiar"
-                  className="p-0.5 text-slate-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
-                ><Copy className="w-3 h-3"/></button>
-              </div>
-            </div>
-
-            {/* Right: stats boxes */}
-            <div className="shrink-0">
-              <div className="flex gap-1.5">
-                <div className="bg-slate-50 px-2 py-1.5 rounded-xl text-center min-w-[44px]">
-                  <p className="text-[8px] font-black text-slate-400 uppercase">Plts</p>
-                  <p className="text-sm font-black text-slate-900 leading-tight">
-                    {totalP}{order.loomPallets ? <span className="text-[8px] text-gray-400 font-medium block">({order.loomPallets}Lm)</span> : ""}
-                  </p>
-                </div>
-                <div className="bg-slate-50 px-2 py-1.5 rounded-xl text-center min-w-[44px]">
-                  <p className="text-[8px] font-black text-slate-400 uppercase">Boxes</p>
-                  <p className="text-sm font-black text-slate-900 leading-tight">{Number(order.boxes||0).toLocaleString()}</p>
-                </div>
-                <div className="bg-slate-50 px-2 py-1.5 rounded-xl text-center min-w-[44px]">
-                  <p className="text-[8px] font-black text-slate-400 uppercase">Lbs</p>
-                  <p className="text-sm font-black text-slate-900 leading-tight">{Number(order.weight||0).toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
+        {/* Main content */}
+        <div className="flex-1 p-3 min-w-0">
+          {/* Status + copy */}
+          <div className="flex items-center justify-between mb-1">
+            <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${statusColor}`}>
+              <StatusIcon className="w-3 h-3 shrink-0" />
+              {displayStatus}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
+              title="Copiar"
+              className="p-0.5 text-gray-400 hover:text-orange-400 transition-colors opacity-40 group-hover:opacity-100 shrink-0"
+            ><Copy className="w-3 h-3"/></button>
           </div>
 
-          {/* Row 2: PO + Truck */}
-          <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-0.5 text-[12px] text-slate-500">
-            <span><span className="font-medium">PO:</span> <span className="text-slate-800 font-bold">{order.po || "N/A"}</span></span>
-            <span><span className="font-medium">Truck:</span> <span className="text-slate-800 font-bold">{order.truckId || "Unassigned"}</span></span>
+          {/* Order ID — full width, never truncates */}
+          <h3 className="text-gray-900 font-black text-[17px] leading-tight group-hover:text-orange-600 transition-colors mb-2 break-all">{order.id}</h3>
+
+          {/* PO + Truck */}
+          <div className={`pt-2 border-t text-[12px] text-gray-500 space-y-0.5 ${divider}`}>
+            <div><span className="font-medium">PO:</span> <span className="text-gray-800 font-bold">{order.po || "N/A"}</span></div>
+            <div><span className="font-medium">Truck:</span> <span className="text-gray-800 font-bold">{order.truckId || "Unassigned"}</span></div>
           </div>
 
-          {/* Row 3: Backorders (if any) — shown before notes */}
+          {/* Backorders */}
           {backorders.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {backorders.map((bo, idx) => (
@@ -879,18 +899,35 @@ export default function App() {
             </div>
           )}
 
-          {/* Row 4: Notes (if any) */}
+          {/* Notes */}
           {order.notes && (
-            <p className="mt-1.5 text-[11px] text-slate-500 italic line-clamp-2 leading-snug">{order.notes}</p>
+            <p className="mt-1.5 text-[11px] text-gray-500 italic line-clamp-2 leading-snug">{order.notes}</p>
           )}
 
-          {/* Edit/Delete actions */}
+          {/* Edit/Delete */}
           {!isReadOnly && (
-            <div className="flex gap-1 justify-end mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => openQuickEdit(order)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+            <div className="flex gap-1 justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => openQuickEdit(order)} className="p-1 text-gray-400 hover:text-orange-500 hover:bg-white/60 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1 text-gray-400 hover:text-red-600 hover:bg-white/60 rounded-lg transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
           )}
+        </div>
+
+        {/* Right: vertical stats panel */}
+        <div className={`flex flex-col divide-y border-l w-[62px] shrink-0 ${statPanelBg}`}>
+          <div className="flex-1 flex flex-col items-center justify-center py-2 px-1 text-center">
+            <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Plts</p>
+            <p className="text-[15px] font-black text-gray-900 leading-none">{totalP}</p>
+            {order.loomPallets ? <span className="text-[8px] text-gray-400 font-medium leading-tight">({order.loomPallets}Lm)</span> : null}
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center py-2 px-1 text-center">
+            <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Boxes</p>
+            <p className="text-[15px] font-black text-gray-900 leading-none">{Number(order.boxes||0).toLocaleString()}</p>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center py-2 px-1 text-center">
+            <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Lbs</p>
+            <p className="text-[13px] font-black text-gray-900 leading-none">{Number(order.weight||0).toLocaleString()}</p>
+          </div>
         </div>
       </div>
     );
@@ -901,10 +938,10 @@ export default function App() {
   // -------------------------------------------------------------------------
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#f4f6f8] flex items-center justify-center font-sans">
-        <div className="flex flex-col items-center gap-3 text-slate-500">
-          <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"/>
-          <span className="text-sm font-medium">Verifying session…</span>
+      <div className="min-h-screen bg-[#f9f7f4] flex items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-3 text-gray-400">
+          <div className="w-8 h-8 border-4 border-orange-100 border-t-orange-500 rounded-full animate-spin"/>
+          <span className="text-sm font-medium text-gray-500">Verifying session…</span>
         </div>
       </div>
     );
@@ -912,27 +949,32 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen bg-[#f4f6f8] flex items-center justify-center font-sans">
-        <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
-          <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center"><User className="w-8 h-8"/></div>
+      <div className="min-h-screen bg-[#f9f7f4] flex items-center justify-center font-sans p-4">
+        <div className="w-full max-w-sm">
+          {/* Brand mark */}
+          <div className="flex justify-center mb-8">
+            <div className="flex items-center gap-3">
+              <PacManScene className="h-10 w-auto"/>
+            </div>
           </div>
-          <h1 className="text-2xl font-black text-center text-gray-800 mb-1">Welcome Back</h1>
-          <p className="text-center text-gray-500 text-sm mb-8">Sign in to access the dashboard</p>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Email</label>
-              <input name="email" type="email" autoFocus required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="you@mail.com" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Password</label>
-              <input name="password" type="password" required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="••••••••" />
-            </div>
-            {loginError && (
-              <p className="text-red-600 text-sm font-medium bg-red-50 border border-red-200 rounded-lg px-3 py-2">{loginError}</p>
-            )}
-            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-md transition-colors mt-2">Sign In</button>
-          </form>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+            <h1 className="text-xl font-black text-gray-900 mb-1">Welcome back</h1>
+            <p className="text-gray-400 text-sm mb-7">Sign in to continue</p>
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Email</label>
+                <input name="email" type="email" autoFocus required className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl p-3 text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none transition-all placeholder:text-gray-400" placeholder="you@mail.com" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Password</label>
+                <input name="password" type="password" required className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl p-3 text-sm focus:ring-2 focus:ring-orange-300 focus:border-orange-400 outline-none transition-all placeholder:text-gray-400" placeholder="••••••••" />
+              </div>
+              {loginError && (
+                <p className="text-red-600 text-sm font-medium bg-red-50 border border-red-200 rounded-xl px-3 py-2">{loginError}</p>
+              )}
+              <button type="submit" className="w-full bg-orange-500 hover:bg-orange-600 text-white py-3 rounded-xl font-bold shadow-sm transition-colors mt-1">Sign In</button>
+            </form>
+          </div>
         </div>
       </div>
     );
@@ -945,7 +987,7 @@ export default function App() {
     return (
       <div className="bg-white min-h-screen text-black">
         <div className="print:hidden fixed top-4 right-4 z-50 flex gap-2">
-           <button onClick={() => window.print()} className="bg-blue-600 text-white px-4 py-2 rounded shadow-lg font-bold">Print</button>
+           <button onClick={() => window.print()} className="bg-orange-500 text-white px-4 py-2 rounded shadow-lg font-bold">Print</button>
            <button onClick={() => setPrintMode('none')} className="bg-gray-800 text-white px-4 py-2 rounded shadow-lg font-bold">Close Preview</button>
         </div>
 
@@ -1009,7 +1051,7 @@ export default function App() {
         {/* PACKING LIST GROUPED BY LINE */}
         {printMode === 'packing_list' && (
           <div className="p-10 font-sans mx-auto max-w-[8.5in]">
-            <h1 className="text-center text-3xl font-bold mb-8 text-[#2c3e50]">Packing List</h1>
+            <h1 className="text-center text-lg font-bold mb-6 text-[#2c3e50]">Distribution List</h1>
             <div className="mb-8 text-sm">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po} | <b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
               <p><b>Total Boxes for Order:</b> {totals.boxes.toLocaleString()}</p>
@@ -1078,7 +1120,7 @@ export default function App() {
         {/* WEIGHT SHEET */}
         {printMode === 'weight_sheet' && (
           <div className="p-10 font-sans mx-auto max-w-[8.5in]">
-            <h1 className="text-center text-3xl font-bold mb-8">Weight Sheet</h1>
+            <h1 className="text-center text-lg font-bold mb-6">Weight Sheet</h1>
             <div className="mb-8 text-sm">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po}</p>
               <p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
@@ -1143,27 +1185,31 @@ export default function App() {
               </div>
             ))}
 
-            <h3 className="text-sm font-bold mt-8 mb-3">Grand Totals for {formatDateLong(reportDate)}</h3>
-            <table className="w-full text-left border-collapse border border-gray-300 text-xs">
-               <thead>
-                 <tr className="bg-gray-100">
-                   <th className="px-3 py-2 border-r border-gray-300">Total Trucks/Methods:</th>
-                   <th className="px-3 py-2 border-r border-gray-300">Total Loom Pallets:</th>
-                   <th className="px-3 py-2 border-r border-gray-300">Total Normal Pallets:</th>
-                   <th className="px-3 py-2 border-r border-gray-300">Total Boxes:</th>
-                   <th className="px-3 py-2">Total Weight:</th>
-                 </tr>
-               </thead>
-               <tbody>
-                 <tr>
-                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandTrucks}</td>
-                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandLoomPlts}</td>
-                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandNormalPlts}</td>
-                   <td className="px-3 py-2 text-base font-bold border-r border-gray-300">{truckReportSummary.grandBoxes.toLocaleString()}</td>
-                   <td className="px-3 py-2 text-base font-bold">{truckReportSummary.grandWeight.toLocaleString()} lbs</td>
-                 </tr>
-               </tbody>
-            </table>
+            <div className="mt-8 pt-4 border-t-2 border-gray-800">
+              <h3 className="text-xs font-bold mb-3 uppercase tracking-wider text-gray-700">Grand Totals — {formatDateLong(reportDate)}</h3>
+              <div className="flex gap-3">
+                <div className="flex-1 bg-gray-100 rounded p-2.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-gray-500 font-semibold mb-0.5 whitespace-nowrap">Trucks / Methods</p>
+                  <p className="text-xl font-black text-gray-900">{truckReportSummary.grandTrucks}</p>
+                </div>
+                <div className="flex-1 bg-gray-100 rounded p-2.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-gray-500 font-semibold mb-0.5">Loom Pallets</p>
+                  <p className="text-xl font-black text-gray-900">{truckReportSummary.grandLoomPlts}</p>
+                </div>
+                <div className="flex-1 bg-gray-100 rounded p-2.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-gray-500 font-semibold mb-0.5">Normal Pallets</p>
+                  <p className="text-xl font-black text-gray-900">{truckReportSummary.grandNormalPlts}</p>
+                </div>
+                <div className="flex-1 bg-gray-100 rounded p-2.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-gray-500 font-semibold mb-0.5">Total Boxes</p>
+                  <p className="text-xl font-black text-gray-900">{truckReportSummary.grandBoxes.toLocaleString()}</p>
+                </div>
+                <div className="flex-[1.5] bg-gray-100 rounded p-2.5 text-center">
+                  <p className="text-[9px] uppercase tracking-wide text-gray-500 font-semibold mb-0.5 whitespace-nowrap">Total Weight</p>
+                  <p className="text-xl font-black text-gray-900">{truckReportSummary.grandWeight.toLocaleString()} <span className="text-sm font-bold text-gray-500">lbs</span></p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
         <style>{`@media print { .print\\:hidden { display: none !important; } @page { margin: 0.5in; } .label-page { page-break-after: always; width: 4in; height: 2in; margin: 0; padding: 0.2in; } .sheet-page { page-break-after: always; margin: 0; padding: 0.5in; width: 100%; } }`}</style>
@@ -1175,45 +1221,46 @@ export default function App() {
   // RENDER: MAIN APPLICATION
   // -------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#eef0f3] font-sans text-slate-900 selection:bg-blue-100">
-      <header className="bg-white border-b sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm relative">
+    <div className="min-h-screen bg-[#f9f7f4] font-sans text-gray-900 selection:bg-orange-100">
+      <header className="bg-white sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm border-b border-gray-100 relative">
         {/* Logo */}
-        <h1 className="text-lg sm:text-xl font-black tracking-tighter text-blue-600 select-none">Orders</h1>
-        {/* Nav — centrado en desktop, oculto en móvil */}
+        <h1 className="text-lg sm:text-xl font-black tracking-tight select-none flex items-center gap-2">
+          <PacManScene className="h-6 w-auto shrink-0"/>
+        </h1>
+        {/* Nav */}
         <nav className="hidden sm:flex absolute left-1/2 -translate-x-1/2 h-full items-center gap-1">
           {[
             { id: "Order Summary", icon: <List className="w-4 h-4"/>, label: "Order Summary" },
             { id: "Create Order", icon: <Plus className="w-4 h-4"/>, label: "Create Order" },
             { id: "Truck Report", icon: <TruckIcon className="w-4 h-4"/>, label: "Truck Report" }
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-blue-600 text-blue-600 bg-blue-50/30" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-orange-500 text-orange-600 bg-orange-50/50" : "border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50"}`}>
               {tab.icon} {tab.label}
             </button>
           ))}
         </nav>
         {/* Usuario + hamburger */}
         <div className="ml-auto flex items-center gap-2 sm:gap-4">
-          <span className="hidden sm:inline text-sm font-medium text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></span>
-          <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all" title="Log out"><LogOut className="w-5 h-5" /></button>
-          {/* Hamburger — solo en móvil */}
-          <button onClick={() => setMobileMenuOpen(v => !v)} className="sm:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5"/></button>
+          <span className="hidden sm:inline text-sm text-gray-500">Logged in as <span className="font-bold text-gray-800">{currentUser}</span></span>
+          <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-rose-500 hover:bg-rose-50 rounded-full transition-all" title="Log out"><LogOut className="w-5 h-5" /></button>
+          <button onClick={() => setMobileMenuOpen(v => !v)} className="sm:hidden p-2 text-gray-500 hover:bg-gray-100 rounded-lg"><Menu className="w-5 h-5"/></button>
         </div>
       </header>
       {/* Mobile nav drawer */}
       {mobileMenuOpen && (
-        <div className="sm:hidden fixed inset-0 z-40 bg-slate-900/40" onClick={() => setMobileMenuOpen(false)}>
-          <div className="absolute top-14 left-0 right-0 bg-white border-b shadow-lg" onClick={e => e.stopPropagation()}>
+        <div className="sm:hidden fixed inset-0 z-40 bg-gray-900/30" onClick={() => setMobileMenuOpen(false)}>
+          <div className="absolute top-14 left-0 right-0 bg-white border-b border-gray-100 shadow-lg" onClick={e => e.stopPropagation()}>
             {[
               { id: "Order Summary", icon: <List className="w-5 h-5"/>, label: "Order Summary" },
               { id: "Create Order", icon: <Plus className="w-5 h-5"/>, label: "Create Order" },
               { id: "Truck Report", icon: <TruckIcon className="w-5 h-5"/>, label: "Truck Report" }
             ].map(tab => (
               <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
-                className={`w-full flex items-center gap-3 px-6 py-4 text-sm font-semibold border-b border-slate-100 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "text-blue-600 bg-blue-50" : "text-slate-700 hover:bg-slate-50"}`}>
+                className={`w-full flex items-center gap-3 px-6 py-4 text-sm font-semibold border-b border-gray-100 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "text-orange-600 bg-orange-50" : "text-gray-700 hover:bg-gray-50"}`}>
                 {tab.icon} {tab.label}
               </button>
             ))}
-            <div className="px-6 py-4 text-sm text-gray-500">User: <span className="font-bold text-gray-800">{currentUser}</span></div>
+            <div className="px-6 py-4 text-sm text-gray-500">Logged in as <span className="font-bold text-gray-800">{currentUser}</span></div>
           </div>
         </div>
       )}
@@ -1223,10 +1270,10 @@ export default function App() {
           <div className="animate-in fade-in duration-500">
             <div className="flex flex-col md:flex-row justify-between items-end gap-4 mb-10">
               <div className="w-full max-w-xl">
-                <h2 className="text-2xl font-bold text-slate-800 mb-4">Dashboard</h2>
+                <h2 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">Dashboard</h2>
                 <div className="relative group">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors w-4 h-4" />
-                  <input type="text" placeholder="Search Order ID, PO or Items..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white border-2 border-slate-100 rounded-2xl shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" />
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-400 transition-colors w-4 h-4" />
+                  <input type="text" placeholder="Search Order ID, PO or Items..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white border-2 border-white rounded-2xl shadow-md focus:border-orange-400 focus:ring-4 focus:ring-orange-400/10 outline-none transition-all" />
                 </div>
               </div>
             </div>
@@ -1234,7 +1281,7 @@ export default function App() {
             {delayedOrdersList.length > 0 && (
               <section className="mb-10">
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-10 h-10 bg-red-50 text-red-600 rounded-xl flex items-center justify-center shadow-sm border border-red-100"><AlertTriangle className="w-5 h-5"/></div>
+                  <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center"><AlertTriangle className="w-5 h-5"/></div>
                   <h2 className="text-xl font-black text-slate-900 tracking-tight">Attention Required</h2>
                 </div>
                 <div className="flex flex-wrap gap-4">
@@ -1244,7 +1291,7 @@ export default function App() {
             )}
 
             <section>
-              <h2 className="text-xl font-black text-slate-900 mb-6 tracking-tight">Shipping Schedule</h2>
+              <h2 className="text-xl font-black text-slate-800 mb-6 tracking-tight uppercase text-[13px] letter-spacing-widest">Shipping Schedule</h2>
               <div className="space-y-8">
                 {activeDates.map(dg => {
                   // Conteo de órdenes completadas vs pendientes por fecha
@@ -1252,11 +1299,11 @@ export default function App() {
                   const completedCount = allOrdersInDate.filter(o => o.status === 'Completed').length;
                   const pendingCount = allOrdersInDate.length - completedCount;
                   return (
-                  <div key={dg.date} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <button onClick={() => toggleDate(dg.date, dg.trucks)} className="w-full flex items-center justify-between p-5 bg-slate-50/50 hover:bg-slate-100/50 transition-colors">
+                  <div key={dg.date} className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
+                    <button onClick={() => toggleDate(dg.date, dg.trucks)} className="w-full flex items-center justify-between p-5 bg-white hover:bg-orange-50/30 transition-colors">
                       <div className="flex items-center gap-4">
-                        <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><Calendar className="w-5 h-5 text-blue-600"/></div>
-                        <span className="text-base font-bold text-slate-700">Scheduled for {dg.date}</span>
+                        <div className="bg-orange-100 p-2 rounded-xl"><Calendar className="w-5 h-5 text-orange-600"/></div>
+                        <span className="text-base font-black text-slate-800">Scheduled for {dg.date}</span>
                         <div className="flex items-center gap-2">
                           {completedCount > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{completedCount} Done</span>}
                           {pendingCount > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{pendingCount} Pending</span>}
@@ -1270,14 +1317,14 @@ export default function App() {
                         {dg.trucks.map(t => (
                           <div key={t.id} className="space-y-4">
                             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                              <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-blue-600 transition-colors">
+                              <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-orange-500 transition-colors">
                                 <TruckIcon className="w-4 h-4"/> {t.id}
                                 <ChevronDown className={`w-4 h-4 transition-transform ${expandedTrucks[`${dg.date}-${t.id}`] ? 'rotate-180' : ''}`} />
                               </button>
-                              <div className="flex gap-4 text-[10px] font-bold text-slate-400">
-                                <span>{t.summary.pallets} Plts</span>
-                                <span>{t.summary.boxes} Bxs</span>
-                                <span className="text-slate-700 font-black">{t.summary.weight} LBS</span>
+                              <div className="flex gap-5 items-baseline">
+                                <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{t.summary.pallets}</span> Plts</span>
+                                <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{Number(t.summary.boxes).toLocaleString()}</span> Bxs</span>
+                                <span className="text-orange-600 font-black text-[15px]">{Number(parseFloat(t.summary.weight)).toLocaleString()} <span className="text-[11px] font-bold">LBS</span></span>
                               </div>
                             </div>
                             {expandedTrucks[`${dg.date}-${t.id}`] && (
@@ -1306,7 +1353,7 @@ export default function App() {
                     <div key={dg.date} className="bg-slate-50 rounded-2xl border border-slate-200 shadow-sm overflow-hidden grayscale hover:grayscale-0 transition-all">
                       <div className="flex items-center justify-between pr-4 hover:bg-slate-100/50 transition-colors">
                         <button onClick={() => toggleDate(dg.date, dg.trucks)} className="flex-1 flex items-center gap-4 p-5 text-left">
-                          <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><CheckCircle2 className="w-5 h-5 text-emerald-600"/></div>
+                          <div className="bg-emerald-100 p-2 rounded-xl"><CheckCircle2 className="w-5 h-5 text-emerald-600"/></div>
                           <span className="text-base font-bold text-slate-700">Completed on {dg.date}</span>
                           <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${expandedDates[dg.date] ? 'rotate-180' : ''}`} />
                         </button>
@@ -1320,14 +1367,14 @@ export default function App() {
                           {dg.trucks.map(t => (
                             <div key={t.id} className="space-y-4">
                               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                                <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-blue-600 transition-colors">
+                                <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-orange-500 transition-colors">
                                   <TruckIcon className="w-4 h-4"/> {t.id}
                                   <ChevronDown className={`w-4 h-4 transition-transform ${expandedTrucks[`${dg.date}-${t.id}`] ? 'rotate-180' : ''}`} />
                                 </button>
-                                <div className="flex gap-4 text-[10px] font-bold text-slate-400">
-                                  <span>{t.summary.pallets} Plts</span>
-                                  <span>{t.summary.boxes} Bxs</span>
-                                  <span className="text-emerald-600 font-black">{t.summary.weight} LBS</span>
+                                <div className="flex gap-5 items-baseline">
+                                  <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{t.summary.pallets}</span> Plts</span>
+                                  <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{Number(t.summary.boxes).toLocaleString()}</span> Bxs</span>
+                                  <span className="text-emerald-600 font-black text-[15px]">{Number(parseFloat(t.summary.weight)).toLocaleString()} <span className="text-[11px] font-bold">LBS</span></span>
                                 </div>
                               </div>
                               {expandedTrucks[`${dg.date}-${t.id}`] && (
@@ -1358,21 +1405,21 @@ export default function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Order ID <span className="text-red-500">*</span></label>
-                  <input required value={newOrderForm.id} onChange={e => setNewOrderForm({...newOrderForm, id: e.target.value})} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm focus:ring-blue-500 outline-none" placeholder="e.g., ORD12345" />
+                  <input required value={newOrderForm.id} onChange={e => setNewOrderForm({...newOrderForm, id: e.target.value})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm focus:ring-orange-400 outline-none" placeholder="e.g., ORD12345" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">PO Reference</label>
-                  <input value={newOrderForm.po} onChange={e => setNewOrderForm({...newOrderForm, po: e.target.value})} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm focus:ring-blue-500 outline-none" placeholder="e.g., PO67890"/>
+                  <input value={newOrderForm.po} onChange={e => setNewOrderForm({...newOrderForm, po: e.target.value})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm focus:ring-orange-400 outline-none" placeholder="e.g., PO67890"/>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Ship Date <span className="text-red-500">*</span></label>
                   <div className="relative">
-                    <input type="date" required value={formatForInput(newOrderForm.shipmentDate)} onChange={e => setNewOrderForm({...newOrderForm, shipmentDate: formatFromInput(e.target.value)})} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm focus:ring-blue-500 outline-none" />
+                    <input type="date" required value={formatForInput(newOrderForm.shipmentDate)} onChange={e => setNewOrderForm({...newOrderForm, shipmentDate: formatFromInput(e.target.value)})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm focus:ring-orange-400 outline-none" />
                   </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Freight Terms</label>
-                  <select value={newOrderForm.freight} onChange={e => setNewOrderForm({...newOrderForm, freight: e.target.value})} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm outline-none appearance-none">
+                  <select value={newOrderForm.freight} onChange={e => setNewOrderForm({...newOrderForm, freight: e.target.value})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm outline-none appearance-none">
                     <option value="Select Freight Terms">Select Freight Terms</option>
                     <option value="Collect">Collect</option>
                     <option value="PPD and Charge">PPD and Charge</option>
@@ -1382,7 +1429,7 @@ export default function App() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Truck Assignment</label>
-                  <select value={newOrderForm.truckId} onChange={e => setNewOrderForm({...newOrderForm, truckId: e.target.value})} className="w-full max-w-md bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm outline-none appearance-none">
+                  <select value={newOrderForm.truckId} onChange={e => setNewOrderForm({...newOrderForm, truckId: e.target.value})} className="w-full max-w-md bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm outline-none appearance-none">
                     <option value="N/A">N/A</option>
                     <option value="Truck 1">Truck 1</option>
                     <option value="Truck 2">Truck 2</option>
@@ -1395,12 +1442,12 @@ export default function App() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-                  <textarea rows={3} value={newOrderForm.notes} onChange={e => setNewOrderForm({...newOrderForm, notes: e.target.value})} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-3 text-sm outline-none resize-none" placeholder="Optional notes for the order" />
+                  <textarea rows={3} value={newOrderForm.notes} onChange={e => setNewOrderForm({...newOrderForm, notes: e.target.value})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-3 text-sm outline-none resize-none" placeholder="Optional notes for the order" />
                 </div>
               </div>
               <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-100">
                 <button type="button" onClick={() => setActiveTab("Order Summary")} className="px-5 py-2 border border-gray-300 rounded-md text-sm font-medium hover:bg-gray-50">Cancel</button>
-                <button type="submit" className="px-6 py-2 bg-[#1e6acb] text-white rounded-md text-sm font-bold hover:bg-blue-700 flex items-center gap-2"><Plus className="w-4 h-4"/> Create Order</button>
+                <button type="submit" className="px-6 py-2 bg-orange-500 text-white rounded-md text-sm font-bold hover:bg-orange-600 flex items-center gap-2"><Plus className="w-4 h-4"/> Create Order</button>
               </div>
             </form>
           </div>
@@ -1416,7 +1463,7 @@ export default function App() {
                     <label className="block text-xs font-bold text-gray-500 mb-1">Report Date</label>
                     <input type="date" value={formatForInput(reportDate)} onChange={e => setReportDate(formatFromInput(e.target.value))} className="border border-gray-300 rounded p-2 text-sm outline-none" />
                  </div>
-                 <button onClick={() => triggerPrint('truck_report')} className="mt-4 px-4 py-2 bg-[#1e6acb] text-white font-bold text-sm rounded shadow-sm flex items-center gap-2 hover:bg-blue-700"><Printer className="w-4 h-4"/> Print Report</button>
+                 <button onClick={() => triggerPrint('truck_report')} className="mt-4 px-4 py-2 bg-orange-500 text-white font-bold text-sm rounded shadow-sm flex items-center gap-2 hover:bg-orange-600"><Printer className="w-4 h-4"/> Print Report</button>
               </div>
 
               {reportDateData ? (
@@ -1484,11 +1531,11 @@ export default function App() {
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
               <button onClick={() => { setEditingOrder(null); setPendingRemoteUpdate(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
               <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
-                <button onClick={() => setDetailsTab('general')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='general' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4 shrink-0"/> <span className="hidden xs:inline">Order </span>Details</button>
-                <button onClick={() => setDetailsTab('packing_list')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='packing_list' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4 shrink-0"/> Packing</button>
-                <button onClick={() => setDetailsTab('weight_sheet')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='weight_sheet' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Package className="w-4 h-4 shrink-0"/> Weight</button>
-                <button onClick={() => setDetailsTab('items')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='items' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><List className="w-4 h-4 shrink-0"/> Items</button>
-                <button onClick={() => setDetailsTab('order_check')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='order_check' ? 'bg-[#f4f6f8] text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><CheckSquare className="w-4 h-4 shrink-0"/> Check</button>
+                <button onClick={() => setDetailsTab('general')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='general' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4 shrink-0"/> <span className="hidden xs:inline">Order </span>Details</button>
+                <button onClick={() => setDetailsTab('packing_list')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='packing_list' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4 shrink-0"/> Distribution</button>
+                <button onClick={() => setDetailsTab('weight_sheet')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='weight_sheet' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Package className="w-4 h-4 shrink-0"/> Weight</button>
+                <button onClick={() => setDetailsTab('items')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='items' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><List className="w-4 h-4 shrink-0"/> Items</button>
+                <button onClick={() => setDetailsTab('order_check')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='order_check' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><CheckSquare className="w-4 h-4 shrink-0"/> Check</button>
               </div>
             </div>
 
@@ -1524,7 +1571,7 @@ export default function App() {
               <>
                 <div className="bg-white border border-gray-200 shadow-sm mb-6 rounded-md">
                   <div className="p-5 border-b border-gray-100 flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-[#1e6acb]">Order Details</h2>
+                    <h2 className="text-2xl font-bold text-orange-500">Order Details</h2>
                     <span className="text-sm font-medium text-green-600 bg-green-50 px-3 py-1 rounded border border-green-100 flex items-center gap-2"><CheckCircle2 className="w-4 h-4"/> Auto-Save Active (Supabase)</span>
                   </div>
                   <div className="p-6">
@@ -1536,7 +1583,7 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">PO (Purchase Order)</label>
-                        <input value={editingOrder.po} onChange={e => handleInputChange('po', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2.5 text-sm outline-none focus:border-blue-500 font-bold" />
+                        <input value={editingOrder.po} onChange={e => handleInputChange('po', e.target.value)} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm outline-none focus:border-orange-400 font-bold" />
                       </div>
                     </div>
 
@@ -1559,12 +1606,12 @@ export default function App() {
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Shipment Date</label>
                         <div className="relative">
-                          <input type="date" value={formatForInput(editingOrder.shipmentDate || "")} onChange={e => handleInputChange('shipmentDate', formatFromInput(e.target.value))} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none focus:border-blue-500" />
+                          <input type="date" value={formatForInput(editingOrder.shipmentDate || "")} onChange={e => handleInputChange('shipmentDate', formatFromInput(e.target.value))} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2 text-sm outline-none focus:border-orange-400" />
                         </div>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Freight Terms</label>
-                        <select value={editingOrder.freight} onChange={e => handleInputChange('freight', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none">
+                        <select value={editingOrder.freight} onChange={e => handleInputChange('freight', e.target.value)} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none">
                           <option value="Collect">Collect</option>
                           <option value="PPD and Charge">PPD and Charge</option>
                           <option value="CPT">CPT</option>
@@ -1573,7 +1620,7 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Truck Assignment / Shipping Method</label>
-                        <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none font-bold text-blue-600">
+                        <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none font-bold text-orange-500">
                           <option value="Unassigned">Unassigned</option>
                           <option value="Truck 1">Truck 1</option>
                           <option value="Truck 2">Truck 2</option>
@@ -1590,7 +1637,7 @@ export default function App() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Order Status</label>
-                        <select value={editingOrder.status} onChange={e => handleInputChange('status', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none">
+                        <select value={editingOrder.status} onChange={e => handleInputChange('status', e.target.value)} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none">
                           <option value="Completed">Completed</option>
                           <option value="In Progress">In Progress</option>
                           <option value="Delayed">Delayed</option>
@@ -1598,13 +1645,13 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Number of Loose Boxes Shipped</label>
-                        <input type="number" value={editingOrder.looseBoxes || 0} onChange={e => handleInputChange('looseBoxes', Number(e.target.value))} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none focus:border-blue-500" />
+                        <input type="number" value={editingOrder.looseBoxes || 0} onChange={e => handleInputChange('looseBoxes', Number(e.target.value))} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2 text-sm outline-none focus:border-orange-400" />
                       </div>
                     </div>
 
                     <div className="mb-5">
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
-                      <textarea rows={3} value={editingOrder.notes || ""} onChange={e => handleInputChange('notes', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-3 text-sm outline-none focus:border-blue-500 resize-none" />
+                      <textarea rows={3} value={editingOrder.notes || ""} onChange={e => handleInputChange('notes', e.target.value)} className="w-full bg-slate-100 border border-gray-200 rounded-md p-3 text-sm outline-none focus:border-orange-400 resize-none" />
                     </div>
 
                     {/* Backorder summary */}
@@ -1637,7 +1684,7 @@ export default function App() {
                       <button onClick={() => triggerPrint('pallet_sheets_all')} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><Printer className="w-4 h-4"/> Print All Sheets</button>
                       <button onClick={() => triggerPrint('labels_all')} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><Printer className="w-4 h-4"/> Print All Labels</button>
                       <button onClick={() => setIsBulkModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 shadow-sm"><Database className="w-4 h-4"/> Add Bulk</button>
-                      <button onClick={handleAddPallet} className="flex items-center gap-1.5 px-4 py-1.5 bg-[#1e6acb] text-white rounded text-sm font-bold hover:bg-blue-700 shadow-sm"><Plus className="w-4 h-4"/> Add Pallet</button>
+                      <button onClick={handleAddPallet} className="flex items-center gap-1.5 px-4 py-1.5 bg-orange-500 text-white rounded text-sm font-bold hover:bg-orange-600 shadow-sm"><Plus className="w-4 h-4"/> Add Pallet</button>
                     </div>
                   </div>
 
@@ -1648,14 +1695,14 @@ export default function App() {
                       <div key={pallet.id} className={`bg-white border ${isLoom ? 'border-purple-300' : 'border-gray-300'} rounded-md shadow-sm`}>
                         <div className={`p-4 flex justify-between items-center transition-colors ${isLoom ? 'bg-purple-50 hover:bg-purple-100' : 'bg-white hover:bg-gray-50'}`}>
                           <div className="flex items-center gap-6">
-                            <span className={`font-bold text-[15px] ${isLoom ? 'text-purple-700' : 'text-[#1e6acb]'}`}>Pallet {pallet.number} {isLoom && <span className="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded ml-2">LOOM</span>}</span>
+                            <span className={`font-bold text-[15px] ${isLoom ? 'text-purple-700' : 'text-orange-500'}`}>Pallet {pallet.number} {isLoom && <span className="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded ml-2">LOOM</span>}</span>
                             <div className="flex gap-4 text-sm text-gray-600">
                               <span>Boxes: <span className="font-bold text-gray-800 bg-gray-100 px-1.5 py-0.5 rounded">{pallet.boxes}</span></span>
                               <span>Weight: <span className="font-bold text-gray-800 bg-gray-100 px-1.5 py-0.5 rounded">{pallet.weight} lbs</span></span>
                             </div>
                           </div>
                           <div className="flex items-center gap-4 text-gray-500">
-                            <button onClick={() => setExpandedPallets(p => ({...p, [pallet.id]: !p[pallet.id]}))}><ChevronDown className={`w-4 h-4 transition-transform ${expandedPallets[pallet.id] ? 'rotate-180 text-blue-600' : ''}`}/></button>
+                            <button onClick={() => setExpandedPallets(p => ({...p, [pallet.id]: !p[pallet.id]}))}><ChevronDown className={`w-4 h-4 transition-transform ${expandedPallets[pallet.id] ? 'rotate-180 text-orange-500' : ''}`}/></button>
                             
                             <button onClick={() => printPalletSheet(pallet)} title="Print Pallet Sheet"><FileText className="w-4 h-4 hover:text-gray-800"/></button>
                             <button onClick={() => printLabel(pallet)} title="Print Label"><Tag className="w-4 h-4 hover:text-gray-800"/></button>
@@ -1665,7 +1712,7 @@ export default function App() {
                               {movingPalletId === pallet.id && (
                                 <div className="absolute right-0 mt-2 bg-white border shadow-xl rounded p-2 z-10 w-48 flex gap-2">
                                   <input type="number" min="1" max={editingOrder.palletList?.length} value={targetPosition} onChange={e => setTargetPosition(parseInt(e.target.value))} className="w-full border rounded p-1 text-sm"/>
-                                  <button onClick={executeMovePallet} className="bg-[#1e6acb] text-white px-2 py-1 rounded text-xs font-bold">Move</button>
+                                  <button onClick={executeMovePallet} className="bg-orange-500 text-white px-2 py-1 rounded text-xs font-bold">Move</button>
                                 </div>
                               )}
                             </div>
@@ -1717,10 +1764,10 @@ export default function App() {
                <div className="bg-white border border-gray-200 rounded-md p-10 shadow-sm animate-in fade-in">
                   <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-4">
                      <div>
-                       <h2 className="text-2xl font-bold text-[#1e6acb] mb-2">Packing List</h2>
+                       <h2 className="text-2xl font-bold text-orange-500 mb-2">Distribution List</h2>
                        <p className="text-sm text-gray-600">Order: {editingOrder.id} | PO: {editingOrder.po} | Total Boxes: {totals.boxes}</p>
                      </div>
-                     <button onClick={() => triggerPrint('packing_list')} className="px-4 py-2 bg-[#1e6acb] text-white rounded-md font-bold flex gap-2"><Printer className="w-4 h-4"/> Print List</button>
+                     <button onClick={() => triggerPrint('packing_list')} className="px-4 py-2 bg-orange-500 text-white rounded-md font-bold flex gap-2"><Printer className="w-4 h-4"/> Print Distribution List</button>
                   </div>
                   <table className="w-full text-sm text-left border border-gray-200">
                     <thead className="bg-gray-100 text-gray-600">
@@ -1781,7 +1828,7 @@ export default function App() {
                <div className="bg-white border border-gray-200 rounded-md p-10 shadow-sm animate-in fade-in">
                   <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-4">
                      <div>
-                       <h2 className="text-2xl font-bold text-[#1e6acb] mb-2">Weight Sheet</h2>
+                       <h2 className="text-2xl font-bold text-orange-500 mb-2">Weight Sheet</h2>
                        <div className="text-sm text-gray-600 font-medium">
                          <p>Order #: {editingOrder.id}</p><p>PO: {editingOrder.po}</p><p>Ship Date: {editingOrder.shipmentDate}</p><p>Total Boxes: {totals.boxes}</p>
                        </div>
@@ -1803,7 +1850,7 @@ export default function App() {
                                <input 
                                  value={displayWeight} 
                                  onChange={e => setEditingOrder({...editingOrder, palletList: editingOrder.palletList?.map(px => px.id === p.id ? {...px, weight: e.target.value} : px)})} 
-                                 className="w-24 border border-gray-300 rounded p-1.5 text-right bg-gray-50 outline-none focus:bg-white focus:border-blue-500 shadow-sm" 
+                                 className="w-24 border border-gray-300 rounded p-1.5 text-right bg-gray-50 outline-none focus:bg-white focus:border-orange-400 shadow-sm" 
                                  placeholder="Enter Weight"
                                />
                             </td>
@@ -1826,7 +1873,7 @@ export default function App() {
                       <div className="mb-8">
                         <div className="flex items-center gap-2 mb-2">
                           <span className="text-sm text-gray-500 font-medium">Agregando:</span>
-                          <span className="bg-blue-600 text-white text-sm font-bold px-3 py-0.5 rounded-full">Línea {nextLineNo}</span>
+                          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-0.5 rounded-full">Línea {nextLineNo}</span>
                         </div>
                         <div className="flex gap-4 bg-gray-50 p-4 rounded border border-gray-200">
                           <input
@@ -1834,7 +1881,7 @@ export default function App() {
                             onChange={e => setNewItemNumberForm(e.target.value)}
                             onKeyDown={e => { if(e.key === 'Enter') handleAddMasterItem() }}
                             placeholder="Press Enter or Add to List"
-                            className="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500"
+                            className="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
                             autoFocus
                           />
                           <button onClick={handleAddMasterItem} className="bg-white border border-gray-300 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-gray-50"><Plus className="w-4 h-4"/> Add to List</button>
@@ -1865,9 +1912,9 @@ export default function App() {
             {detailsTab === 'order_check' && (
                <div className="bg-white border border-gray-200 rounded-md p-8 shadow-sm animate-in fade-in">
                   <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-bold text-[#1e6acb]">Order Review & Validation</h2>
+                    <h2 className="text-xl font-bold text-orange-500">Order Review & Validation</h2>
                   </div>
-                  <p className="text-sm text-gray-500 mb-6 flex items-center gap-2 bg-blue-50 p-3 rounded text-blue-800 border border-blue-100"><Info className="w-4 h-4"/>Enter the required boxes and quantities from the order paper. The system compares in real time with what has been scanned.</p>
+                  <p className="text-sm text-gray-500 mb-6 flex items-center gap-2 bg-orange-50 p-3 rounded text-violet-800 border border-orange-100"><Info className="w-4 h-4"/>Enter the required boxes and quantities from the order paper. The system compares in real time with what has been scanned.</p>
                   
                   <table className="w-full text-sm text-left border border-gray-200">
                     <thead className="bg-gray-100 text-gray-600">
@@ -1911,10 +1958,10 @@ export default function App() {
                               <td className="p-3 font-bold">{m.lineNo}</td>
                               <td className="p-3 font-mono">{m.itemNumber}</td>
                               <td className="p-3 text-center">
-                                <input type="number" value={m.orderedBoxes || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedBoxes', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-20 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" placeholder="0"/>
+                                <input type="number" value={m.orderedBoxes || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedBoxes', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-20 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-orange-400 shadow-sm" placeholder="0"/>
                               </td>
                               <td className="p-3 text-center">
-                                <input type="number" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-24 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-blue-500 shadow-sm" placeholder="0"/>
+                                <input type="number" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-24 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-orange-400 shadow-sm" placeholder="0"/>
                               </td>
                               <td className="p-3 text-center font-bold text-gray-800">{packedBoxes.toLocaleString()}</td>
                               <td className="p-3 text-center font-bold text-gray-800">{packedQty.toLocaleString()}</td>
@@ -1938,13 +1985,13 @@ export default function App() {
                                         return (
                                           <div key={pallet.id} className="flex items-center justify-between bg-white border border-gray-200 rounded px-3 py-2 shadow-sm">
                                             <div className="flex items-center gap-4 text-sm">
-                                              <span className={`font-bold ${isLoomPallet(pallet) ? 'text-purple-700' : 'text-[#1e6acb]'}`}>Pallet {pallet.number}{isLoomPallet(pallet) ? ' (Loom)' : ''}</span>
+                                              <span className={`font-bold ${isLoomPallet(pallet) ? 'text-purple-700' : 'text-orange-500'}`}>Pallet {pallet.number}{isLoomPallet(pallet) ? ' (Loom)' : ''}</span>
                                               {lineItems.map(li => (
                                                 <span key={li.id} className="text-gray-600">{li.boxes} boxes × {(Number(li.qtyPerBox)||0).toLocaleString()} qty/box = <b>{(li.boxes * (Number(li.qtyPerBox)||0)).toLocaleString()} pcs</b></span>
                                               ))}
                                             </div>
                                             <button onClick={() => setEditingPalletId(pallet.id)}
-                                              className="flex items-center gap-1 px-3 py-1 bg-[#1e6acb] hover:bg-blue-700 text-white text-xs font-bold rounded shadow-sm">
+                                              className="flex items-center gap-1 px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded shadow-sm">
                                               <Pencil className="w-3 h-3"/> Edit Pallet
                                             </button>
                                           </div>
@@ -1973,7 +2020,7 @@ export default function App() {
       {editingPalletId && editingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setEditingPalletId(null)} />
-          <div className="relative bg-[#f4f6f8] rounded-md shadow-2xl w-full max-w-[550px] flex flex-col max-h-[90vh]">
+          <div className="relative bg-slate-100 rounded-md shadow-2xl w-full max-w-[550px] flex flex-col max-h-[90vh]">
             <div className="p-4 flex justify-between items-center border-b border-gray-200 bg-white rounded-t-md">
               <h3 className="text-lg font-bold text-gray-800">
                 Edit Pallet {editingOrder.palletList?.find(p => p.id === editingPalletId)?.number}
@@ -1989,10 +2036,10 @@ export default function App() {
                     <div key={item.id} className="flex justify-between items-center border border-gray-200 p-2.5 rounded shadow-sm">
                       <div className="flex flex-col">
                         <span className="text-[13px] text-gray-700 font-bold">L{item.lineNo}: {item.itemNumber}</span>
-                        <span className="text-[11px] text-gray-500">({item.boxes}b x {item.qtyPerBox}u = {item.boxes * item.qtyPerBox}p) - Added by <span className="font-bold text-blue-600">{item.addedBy || 'N/A'}</span></span>
+                        <span className="text-[11px] text-gray-500">({item.boxes}b x {item.qtyPerBox}u = {item.boxes * item.qtyPerBox}p) - Added by <span className="font-bold text-orange-500">{item.addedBy || 'N/A'}</span></span>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={() => {setLineItemForm({...item}); setEditingLineItemId(item.id);}} className="text-blue-500 hover:text-blue-700"><Pencil className="w-4 h-4"/></button>
+                        <button onClick={() => {setLineItemForm({...item}); setEditingLineItemId(item.id);}} className="text-orange-400 hover:text-orange-600"><Pencil className="w-4 h-4"/></button>
                         <button onClick={() => setEditingOrder({...editingOrder, palletList: editingOrder.palletList?.map(p => p.id === editingPalletId ? {...p, items: p.items.filter(i => i.id !== item.id), boxes: p.items.filter(i => i.id !== item.id).reduce((s,i)=>s+(Number(i.boxes)||0),0)} : p)})} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
                       </div>
                     </div>
@@ -2006,26 +2053,26 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Line No.</label>
-                    <input value={lineItemForm.lineNo} onChange={e => handleLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-blue-500" />
+                    <input value={lineItemForm.lineNo} onChange={e => handleLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Item Number</label>
-                    <input value={lineItemForm.itemNumber} onChange={e => setLineItemForm({...lineItemForm, itemNumber: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-blue-500" placeholder="SKU123" />
+                    <input value={lineItemForm.itemNumber} onChange={e => setLineItemForm({...lineItemForm, itemNumber: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" placeholder="SKU123" />
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">No. of Boxes</label>
-                    <input type="number" value={lineItemForm.boxes || ""} onChange={e => setLineItemForm({...lineItemForm, boxes: Number(e.target.value)})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-blue-500" />
+                    <input type="number" value={lineItemForm.boxes || ""} onChange={e => setLineItemForm({...lineItemForm, boxes: Number(e.target.value)})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Qty/Box</label>
-                    <input type="number" placeholder="Manual/Auto" value={lineItemForm.qtyPerBox || ""} onChange={e => setLineItemForm({...lineItemForm, qtyPerBox: Number(e.target.value)})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-blue-500" />
+                    <input type="number" placeholder="Manual/Auto" value={lineItemForm.qtyPerBox || ""} onChange={e => setLineItemForm({...lineItemForm, qtyPerBox: Number(e.target.value)})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
                   </div>
                 </div>
-                <button onClick={() => handleSaveLineItem()} className="w-full py-2 bg-[#f4f6f8] border border-gray-300 rounded text-[13px] font-bold text-[#1e6acb] hover:bg-white flex justify-center items-center gap-1.5 shadow-sm transition-colors"><Plus className="w-4 h-4"/> {editingLineItemId ? "Update Item" : "Add Item to Pallet"}</button>
+                <button onClick={() => handleSaveLineItem()} className="w-full py-2 bg-slate-100 border border-gray-300 rounded text-[13px] font-bold text-orange-500 hover:bg-white flex justify-center items-center gap-1.5 shadow-sm transition-colors"><Plus className="w-4 h-4"/> {editingLineItemId ? "Update Item" : "Add Item to Pallet"}</button>
               </div>
             </div>
             <div className="p-4 flex justify-end">
-              <button onClick={() => setEditingPalletId(null)} className="px-5 py-2 bg-[#1e6acb] text-white font-bold rounded shadow-sm hover:bg-blue-700 text-sm">Done & Close</button>
+              <button onClick={() => setEditingPalletId(null)} className="px-5 py-2 bg-orange-500 text-white font-bold rounded shadow-sm hover:bg-orange-600 text-sm">Done & Close</button>
             </div>
           </div>
         </div>
@@ -2035,14 +2082,14 @@ export default function App() {
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setIsBulkModalOpen(false)} />
-          <div className="relative bg-[#f4f6f8] rounded-md shadow-2xl w-full max-w-sm flex flex-col">
+          <div className="relative bg-slate-100 rounded-md shadow-2xl w-full max-w-sm flex flex-col">
             <div className="p-5 flex justify-between items-center border-b border-gray-200 bg-white rounded-t-md">
               <h3 className="text-lg font-bold text-gray-800">Add Bulk</h3>
               <button onClick={() => setIsBulkModalOpen(false)} className="text-gray-500"><X className="w-5 h-5"/></button>
             </div>
             <div className="flex border-b border-gray-200 bg-white">
-               <button onClick={() => setBulkTab('looms')} className={`flex-1 py-3 text-sm font-bold ${bulkTab === 'looms' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Looms</button>
-               <button onClick={() => setBulkTab('standard')} className={`flex-1 py-3 text-sm font-bold ${bulkTab === 'standard' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}>Standard Items</button>
+               <button onClick={() => setBulkTab('looms')} className={`flex-1 py-3 text-sm font-bold ${bulkTab === 'looms' ? 'border-b-2 border-orange-500 text-orange-500' : 'text-gray-500'}`}>Looms</button>
+               <button onClick={() => setBulkTab('standard')} className={`flex-1 py-3 text-sm font-bold ${bulkTab === 'standard' ? 'border-b-2 border-orange-500 text-orange-500' : 'text-gray-500'}`}>Standard Items</button>
             </div>
             <div className="p-6 space-y-4">
               {bulkTab === 'looms' ? (
@@ -2050,16 +2097,16 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-bold text-gray-700 mb-1">Line No. <span className="text-red-500">*</span></label>
-                      <input type="text" value={bulkForm.lineNo} onChange={e => handleBulkLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" />
+                      <input type="text" value={bulkForm.lineNo} onChange={e => handleBulkLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400" />
                     </div>
                     <div>
                       <label className="block text-sm font-bold text-gray-700 mb-1">Item Number <span className="text-red-500">*</span></label>
-                      <input type="text" value={bulkForm.itemNo} onChange={e => setBulkForm({...bulkForm, itemNo: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" />
+                      <input type="text" value={bulkForm.itemNo} onChange={e => setBulkForm({...bulkForm, itemNo: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">Loom Size <span className="text-red-500">*</span></label>
-                    <select value={bulkForm.loomSize} onChange={e => setBulkForm({...bulkForm, loomSize: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500">
+                    <select value={bulkForm.loomSize} onChange={e => setBulkForm({...bulkForm, loomSize: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400">
                       <option value="15000">15000</option>
                       <option value="4200">4200</option>
                       <option value="25000">25000</option>
@@ -2068,11 +2115,11 @@ export default function App() {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">Number of Pallets <span className="text-red-500">*</span></label>
-                    <input type="number" placeholder="e.g., 10" value={bulkForm.numPallets} onChange={e => setBulkForm({...bulkForm, numPallets: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" />
+                    <input type="number" placeholder="e.g., 10" value={bulkForm.numPallets} onChange={e => setBulkForm({...bulkForm, numPallets: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">Weight per Pallet (lbs) <span className="text-red-500">*</span></label>
-                    <input type="text" placeholder="e.g., 1200" value={bulkForm.weight} onChange={e => setBulkForm({...bulkForm, weight: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" />
+                    <input type="text" placeholder="e.g., 1200" value={bulkForm.weight} onChange={e => setBulkForm({...bulkForm, weight: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400" />
                   </div>
                 </>
               ) : (
@@ -2080,31 +2127,31 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-gray-700 mb-1">Line No. *</label>
-                      <input type="text" value={bulkForm.lineNo} onChange={e => handleBulkLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-blue-500" />
+                      <input type="text" value={bulkForm.lineNo} onChange={e => handleBulkLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-orange-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-700 mb-1">Item Number *</label>
-                      <input type="text" value={bulkForm.itemNo} onChange={e => setBulkForm({...bulkForm, itemNo: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-blue-500" />
+                      <input type="text" value={bulkForm.itemNo} onChange={e => setBulkForm({...bulkForm, itemNo: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-orange-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-700 mb-1">Boxes per Pallet *</label>
-                      <input type="number" value={bulkForm.boxes} onChange={e => setBulkForm({...bulkForm, boxes: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-blue-500" />
+                      <input type="number" value={bulkForm.boxes} onChange={e => setBulkForm({...bulkForm, boxes: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-orange-400" />
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-700 mb-1">Qty/Box *</label>
-                      <input type="number" value={bulkForm.qtyPerBox} onChange={e => setBulkForm({...bulkForm, qtyPerBox: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-blue-500" />
+                      <input type="number" value={bulkForm.qtyPerBox} onChange={e => setBulkForm({...bulkForm, qtyPerBox: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-orange-400" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">Total Pallets to Create *</label>
-                    <input type="number" value={bulkForm.numPallets} onChange={e => setBulkForm({...bulkForm, numPallets: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-blue-500" />
+                    <input type="number" value={bulkForm.numPallets} onChange={e => setBulkForm({...bulkForm, numPallets: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-2 text-xs focus:border-orange-400" />
                   </div>
                 </>
               )}
             </div>
             <div className="p-5 border-t border-gray-200 bg-white rounded-b-md flex justify-end gap-3">
-              <button onClick={() => setIsBulkModalOpen(false)} className="px-4 py-2 border border-gray-300 rounded text-sm font-medium bg-[#f4f6f8] hover:bg-gray-200">Cancel</button>
-              <button onClick={handleProcessBulkAdd} className="px-4 py-2 bg-[#1e6acb] text-white rounded text-sm font-bold hover:bg-blue-700">Add Pallets</button>
+              <button onClick={() => setIsBulkModalOpen(false)} className="px-4 py-2 border border-gray-300 rounded text-sm font-medium bg-slate-100 hover:bg-gray-200">Cancel</button>
+              <button onClick={handleProcessBulkAdd} className="px-4 py-2 bg-orange-500 text-white rounded text-sm font-bold hover:bg-orange-600">Add Pallets</button>
             </div>
           </div>
         </div>
@@ -2114,7 +2161,7 @@ export default function App() {
       {isQuickEditOpen && editingOrder && (
          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-slate-900/60" onClick={closeAndNavigateSummary} />
-            <div className="relative bg-[#f4f6f8] rounded-md w-full max-w-md shadow-2xl flex flex-col">
+            <div className="relative bg-slate-100 rounded-md w-full max-w-md shadow-2xl flex flex-col">
               <div className="p-5 border-b border-gray-200 bg-white rounded-t-md flex justify-between items-center">
                  <h3 className="text-lg font-bold text-gray-800">Quick Edit: {editingOrder.id}</h3>
                  <button onClick={closeAndNavigateSummary} className="text-gray-500 hover:text-gray-800"><X className="w-5 h-5"/></button>
@@ -2122,20 +2169,20 @@ export default function App() {
               <div className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Order #</label>
-                  <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-blue-500 font-bold ${editingOrder.id !== _activeOrderContext?.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
+                  <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-orange-400 font-bold ${editingOrder.id !== _activeOrderContext?.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
                   {editingOrder.id !== _activeOrderContext?.orderId && <p className="text-[11px] text-amber-600 mt-1">Order # changed — click Save to apply.</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Date <span className="text-red-500">*</span></label>
-                  <input type="date" value={formatForInput(editingOrder.shipmentDate || "")} onChange={e => handleInputChange('shipmentDate', formatFromInput(e.target.value))} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" />
+                  <input type="date" value={formatForInput(editingOrder.shipmentDate || "")} onChange={e => handleInputChange('shipmentDate', formatFromInput(e.target.value))} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                  <textarea rows={3} value={editingOrder.notes || ""} onChange={e => handleInputChange('notes', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500 resize-none" />
+                  <textarea rows={3} value={editingOrder.notes || ""} onChange={e => handleInputChange('notes', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400 resize-none" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Assign Truck</label>
-                  <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none appearance-none font-bold text-blue-600">
+                  <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none appearance-none font-bold text-orange-500">
                     <option value="Unassigned">Unassigned</option>
                     <option value="Truck 1">Truck 1</option>
                     <option value="Truck 2">Truck 2</option>
@@ -2157,24 +2204,24 @@ export default function App() {
                    <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-gray-700 mb-3">
                     <div className="relative">
                       <input type="checkbox" className="sr-only" checked={editingOrder.isManualOverride || false} onChange={e => handleInputChange('isManualOverride', e.target.checked)} />
-                      <div className={`block w-10 h-5 rounded-full ${editingOrder.isManualOverride ? 'bg-blue-500' : 'bg-gray-300'}`}></div>
+                      <div className={`block w-10 h-5 rounded-full ${editingOrder.isManualOverride ? 'bg-orange-400' : 'bg-gray-300'}`}></div>
                       <div className={`dot absolute left-1 top-0.5 bg-white w-4 h-4 rounded-full transition ${editingOrder.isManualOverride ? 'transform translate-x-5' : ''}`}></div>
                     </div>
                     Manually Override Values (Estimates)
                   </label>
                   {editingOrder.isManualOverride && (
                     <div className="grid grid-cols-2 gap-3 bg-white p-4 border border-gray-200 rounded">
-                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Normal Pallets</label><input type="number" value={editingOrder.normalPallets ?? editingOrder.pallets ?? 0} onChange={e => handleInputChange('normalPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
-                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Loom Pallets</label><input type="number" value={editingOrder.loomPallets || 0} onChange={e => handleInputChange('loomPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
-                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Total Boxes</label><input type="number" value={editingOrder.boxes} onChange={e => handleInputChange('boxes', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
-                       <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Weight (lbs)</label><input value={editingOrder.weight} onChange={e => handleInputChange('weight', e.target.value)} className="w-full border rounded p-1.5 text-sm outline-none focus:border-blue-500"/></div>
+                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Normal Pallets</label><input type="number" value={editingOrder.normalPallets ?? editingOrder.pallets ?? 0} onChange={e => handleInputChange('normalPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-orange-400"/></div>
+                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Loom Pallets</label><input type="number" value={editingOrder.loomPallets || 0} onChange={e => handleInputChange('loomPallets', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-orange-400"/></div>
+                       <div><label className="block text-xs font-bold text-gray-600 mb-1">Total Boxes</label><input type="number" value={editingOrder.boxes} onChange={e => handleInputChange('boxes', Number(e.target.value))} className="w-full border rounded p-1.5 text-sm outline-none focus:border-orange-400"/></div>
+                       <div className="col-span-2"><label className="block text-xs font-bold text-gray-600 mb-1">Weight (lbs)</label><input value={editingOrder.weight} onChange={e => handleInputChange('weight', e.target.value)} className="w-full border rounded p-1.5 text-sm outline-none focus:border-orange-400"/></div>
                     </div>
                   )}
                 </div>
               </div>
               <div className="p-4 border-t border-gray-200 bg-white rounded-b-md flex justify-end gap-3">
                 <button onClick={closeAndNavigateSummary} className="px-4 py-2 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50">Close</button>
-                <button onClick={handleQuickEditSave} className="px-4 py-2 bg-[#1e6acb] text-white rounded text-sm font-bold hover:bg-blue-700">Save</button>
+                <button onClick={handleQuickEditSave} className="px-4 py-2 bg-orange-500 text-white rounded text-sm font-bold hover:bg-orange-600">Save</button>
               </div>
             </div>
          </div>
