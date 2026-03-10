@@ -803,12 +803,12 @@ export default function App() {
 
     // Auto-derive display status: "No empezada" if nothing has been added yet
     const isNotStarted = !hasWork && !isCompleted && !isDelayed;
-    const displayStatus = isNotStarted ? 'No empezada' : order.status;
+    const displayStatus = isNotStarted ? 'Not Started' : order.status;
     const accentColor = isCompleted ? 'bg-emerald-500' : isDelayed ? 'bg-red-500' : isNotStarted ? 'bg-slate-400' : 'bg-amber-500';
     const cardBg = isCompleted ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400'
       : isDelayed ? 'bg-red-50/60 border-red-200 hover:border-red-400'
-      : isNotStarted ? 'bg-slate-50/60 border-slate-200 hover:border-indigo-400'
-      : 'bg-amber-50/40 border-amber-200 hover:border-indigo-400';
+      : isNotStarted ? 'bg-slate-50/60 border-slate-200 hover:border-blue-400'
+      : 'bg-amber-50/40 border-amber-200 hover:border-blue-400';
     const statusColor = isCompleted ? 'text-emerald-600' : isDelayed ? 'text-red-600' : isNotStarted ? 'text-slate-400' : 'text-amber-600';
     const StatusIcon = isCompleted ? CheckCircle2 : isDelayed ? AlertCircle : isNotStarted ? Archive : Clock;
 
@@ -832,29 +832,29 @@ export default function App() {
                 {displayStatus}
               </span>
               <div className="flex items-center gap-1">
-                <h3 className="text-slate-900 font-extrabold text-base leading-tight group-hover:text-indigo-600 transition-colors truncate">{order.id}</h3>
+                <h3 className="text-slate-900 font-extrabold text-base leading-tight group-hover:text-blue-600 transition-colors truncate">{order.id}</h3>
                 <button
                   onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
                   title="Copiar"
-                  className="p-0.5 text-slate-300 hover:text-indigo-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  className="p-0.5 text-slate-300 hover:text-blue-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
                 ><Copy className="w-3 h-3"/></button>
               </div>
             </div>
 
-            {/* Right: stats column */}
-            <div className="shrink-0 text-right">
-              <div className="flex gap-2">
-                <div className="text-center">
+            {/* Right: stats boxes */}
+            <div className="shrink-0">
+              <div className="flex gap-1.5">
+                <div className="bg-slate-50 px-2 py-1.5 rounded-xl text-center min-w-[44px]">
                   <p className="text-[8px] font-black text-slate-400 uppercase">Plts</p>
                   <p className="text-sm font-black text-slate-900 leading-tight">
-                    {totalP}{order.loomPallets ? <span className="text-[9px] text-gray-400 font-medium"> ({order.loomPallets}Lm)</span> : ""}
+                    {totalP}{order.loomPallets ? <span className="text-[8px] text-gray-400 font-medium block">({order.loomPallets}Lm)</span> : ""}
                   </p>
                 </div>
-                <div className="text-center">
+                <div className="bg-slate-50 px-2 py-1.5 rounded-xl text-center min-w-[44px]">
                   <p className="text-[8px] font-black text-slate-400 uppercase">Boxes</p>
                   <p className="text-sm font-black text-slate-900 leading-tight">{Number(order.boxes||0).toLocaleString()}</p>
                 </div>
-                <div className="text-center">
+                <div className="bg-slate-50 px-2 py-1.5 rounded-xl text-center min-w-[44px]">
                   <p className="text-[8px] font-black text-slate-400 uppercase">Lbs</p>
                   <p className="text-sm font-black text-slate-900 leading-tight">{Number(order.weight||0).toLocaleString()}</p>
                 </div>
@@ -868,12 +868,7 @@ export default function App() {
             <span><span className="font-medium">Truck:</span> <span className="text-slate-800 font-bold">{order.truckId || "Unassigned"}</span></span>
           </div>
 
-          {/* Row 3: Notes (if any) */}
-          {order.notes && (
-            <p className="mt-1.5 text-[11px] text-slate-500 italic line-clamp-2 leading-snug">{order.notes}</p>
-          )}
-
-          {/* Row 4: Backorders (if any) */}
+          {/* Row 3: Backorders (if any) — shown before notes */}
           {backorders.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {backorders.map((bo, idx) => (
@@ -884,10 +879,15 @@ export default function App() {
             </div>
           )}
 
+          {/* Row 4: Notes (if any) */}
+          {order.notes && (
+            <p className="mt-1.5 text-[11px] text-slate-500 italic line-clamp-2 leading-snug">{order.notes}</p>
+          )}
+
           {/* Edit/Delete actions */}
           {!isReadOnly && (
             <div className="flex gap-1 justify-end mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => openQuickEdit(order)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-3.5 h-3.5" /></button>
+              <button onClick={() => openQuickEdit(order)} className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-3.5 h-3.5" /></button>
               <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
           )}
@@ -903,7 +903,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#f4f6f8] flex items-center justify-center font-sans">
         <div className="flex flex-col items-center gap-3 text-slate-500">
-          <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"/>
+          <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"/>
           <span className="text-sm font-medium">Verifying session…</span>
         </div>
       </div>
@@ -915,23 +915,23 @@ export default function App() {
       <div className="min-h-screen bg-[#f4f6f8] flex items-center justify-center font-sans">
         <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center"><User className="w-8 h-8"/></div>
+            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center"><User className="w-8 h-8"/></div>
           </div>
           <h1 className="text-2xl font-black text-center text-gray-800 mb-1">Welcome Back</h1>
           <p className="text-center text-gray-500 text-sm mb-8">Sign in to access the dashboard</p>
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Email</label>
-              <input name="email" type="email" autoFocus required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="you@mail.com" />
+              <input name="email" type="email" autoFocus required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="you@mail.com" />
             </div>
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Password</label>
-              <input name="password" type="password" required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all" placeholder="••••••••" />
+              <input name="password" type="password" required className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all" placeholder="••••••••" />
             </div>
             {loginError && (
               <p className="text-red-600 text-sm font-medium bg-red-50 border border-red-200 rounded-lg px-3 py-2">{loginError}</p>
             )}
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold shadow-md transition-colors mt-2">Sign In</button>
+            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold shadow-md transition-colors mt-2">Sign In</button>
           </form>
         </div>
       </div>
@@ -1175,10 +1175,10 @@ export default function App() {
   // RENDER: MAIN APPLICATION
   // -------------------------------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#eef0f3] font-sans text-slate-900 selection:bg-indigo-100">
+    <div className="min-h-screen bg-[#eef0f3] font-sans text-slate-900 selection:bg-blue-100">
       <header className="bg-white border-b sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm relative">
         {/* Logo */}
-        <h1 className="text-lg sm:text-xl font-black tracking-tighter text-indigo-600 select-none">Orders</h1>
+        <h1 className="text-lg sm:text-xl font-black tracking-tighter text-blue-600 select-none">Orders</h1>
         {/* Nav — centrado en desktop, oculto en móvil */}
         <nav className="hidden sm:flex absolute left-1/2 -translate-x-1/2 h-full items-center gap-1">
           {[
@@ -1186,7 +1186,7 @@ export default function App() {
             { id: "Create Order", icon: <Plus className="w-4 h-4"/>, label: "Create Order" },
             { id: "Truck Report", icon: <TruckIcon className="w-4 h-4"/>, label: "Truck Report" }
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-indigo-600 text-indigo-600 bg-indigo-50/30" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-blue-600 text-blue-600 bg-blue-50/30" : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50"}`}>
               {tab.icon} {tab.label}
             </button>
           ))}
@@ -1209,7 +1209,7 @@ export default function App() {
               { id: "Truck Report", icon: <TruckIcon className="w-5 h-5"/>, label: "Truck Report" }
             ].map(tab => (
               <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
-                className={`w-full flex items-center gap-3 px-6 py-4 text-sm font-semibold border-b border-slate-100 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "text-indigo-600 bg-indigo-50" : "text-slate-700 hover:bg-slate-50"}`}>
+                className={`w-full flex items-center gap-3 px-6 py-4 text-sm font-semibold border-b border-slate-100 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "text-blue-600 bg-blue-50" : "text-slate-700 hover:bg-slate-50"}`}>
                 {tab.icon} {tab.label}
               </button>
             ))}
@@ -1223,10 +1223,10 @@ export default function App() {
           <div className="animate-in fade-in duration-500">
             <div className="flex flex-col md:flex-row justify-between items-end gap-4 mb-10">
               <div className="w-full max-w-xl">
-                <h2 className="text-2xl font-bold text-slate-800 mb-4">Operations Dashboard</h2>
+                <h2 className="text-2xl font-bold text-slate-800 mb-4">Dashboard</h2>
                 <div className="relative group">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors w-4 h-4" />
-                  <input type="text" placeholder="Search Order ID, PO or Items..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white border-2 border-slate-100 rounded-2xl shadow-sm focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all" />
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors w-4 h-4" />
+                  <input type="text" placeholder="Search Order ID, PO or Items..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-white border-2 border-slate-100 rounded-2xl shadow-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none transition-all" />
                 </div>
               </div>
             </div>
@@ -1255,7 +1255,7 @@ export default function App() {
                   <div key={dg.date} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                     <button onClick={() => toggleDate(dg.date, dg.trucks)} className="w-full flex items-center justify-between p-5 bg-slate-50/50 hover:bg-slate-100/50 transition-colors">
                       <div className="flex items-center gap-4">
-                        <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><Calendar className="w-5 h-5 text-indigo-600"/></div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm"><Calendar className="w-5 h-5 text-blue-600"/></div>
                         <span className="text-base font-bold text-slate-700">Scheduled for {dg.date}</span>
                         <div className="flex items-center gap-2">
                           {completedCount > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{completedCount} Done</span>}
@@ -1270,7 +1270,7 @@ export default function App() {
                         {dg.trucks.map(t => (
                           <div key={t.id} className="space-y-4">
                             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                              <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-indigo-600 transition-colors">
+                              <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-blue-600 transition-colors">
                                 <TruckIcon className="w-4 h-4"/> {t.id}
                                 <ChevronDown className={`w-4 h-4 transition-transform ${expandedTrucks[`${dg.date}-${t.id}`] ? 'rotate-180' : ''}`} />
                               </button>
@@ -1320,7 +1320,7 @@ export default function App() {
                           {dg.trucks.map(t => (
                             <div key={t.id} className="space-y-4">
                               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                                <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-indigo-600 transition-colors">
+                                <button onClick={() => toggleTruck(dg.date, t.id)} className="flex items-center gap-2 text-sm font-bold text-slate-500 uppercase tracking-wider hover:text-blue-600 transition-colors">
                                   <TruckIcon className="w-4 h-4"/> {t.id}
                                   <ChevronDown className={`w-4 h-4 transition-transform ${expandedTrucks[`${dg.date}-${t.id}`] ? 'rotate-180' : ''}`} />
                                 </button>
@@ -1573,7 +1573,7 @@ export default function App() {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1.5">Truck Assignment / Shipping Method</label>
-                        <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none font-bold text-indigo-600">
+                        <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-2 text-sm outline-none appearance-none font-bold text-blue-600">
                           <option value="Unassigned">Unassigned</option>
                           <option value="Truck 1">Truck 1</option>
                           <option value="Truck 2">Truck 2</option>
@@ -1602,10 +1602,31 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="mb-6">
+                    <div className="mb-5">
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">Notes</label>
                       <textarea rows={3} value={editingOrder.notes || ""} onChange={e => handleInputChange('notes', e.target.value)} className="w-full bg-[#f4f6f8] border border-gray-200 rounded-md p-3 text-sm outline-none focus:border-blue-500 resize-none" />
                     </div>
+
+                    {/* Backorder summary */}
+                    {checkOrderIncomplete(editingOrder) && (
+                      <div className="mb-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Backorders</label>
+                        <div className="flex flex-wrap gap-2">
+                          {getBackorders(editingOrder).map((bo, idx) => (
+                            <span key={idx} className="inline-flex items-center gap-1.5 text-sm bg-red-50 border border-red-200 text-red-700 font-bold px-3 py-1.5 rounded-lg">
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0"/>
+                              Line {bo.lineNo}: missing {bo.missingQty > 0 ? bo.missingQty.toLocaleString() + ' pcs' : bo.missingBoxes.toLocaleString() + ' boxes/plts'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {!checkOrderIncomplete(editingOrder) && editingOrder.masterItems && editingOrder.masterItems.length > 0 && (
+                      <div className="mb-2">
+                        <label className="block text-sm font-medium text-gray-700 mb-1.5">Backorders</label>
+                        <p className="text-sm text-emerald-600 font-medium flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4"/> All lines complete — no backorders.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -2114,7 +2135,7 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Assign Truck</label>
-                  <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none appearance-none font-bold text-indigo-600">
+                  <select value={editingOrder.truckId} onChange={e => handleInputChange('truckId', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none appearance-none font-bold text-blue-600">
                     <option value="Unassigned">Unassigned</option>
                     <option value="Truck 1">Truck 1</option>
                     <option value="Truck 2">Truck 2</option>
