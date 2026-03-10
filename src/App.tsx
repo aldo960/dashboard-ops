@@ -799,58 +799,98 @@ export default function App() {
     const isDelayed = order.status === 'Delayed';
     const isCompleted = order.status === 'Completed';
     const totalP = order.isManualOverride ? order.pallets : (order.normalPallets || 0) + (order.loomPallets || 0);
+    const hasWork = totalP > 0 || (Number(order.looseBoxes) || 0) > 0;
+
+    // Auto-derive display status: "No empezada" if nothing has been added yet
+    const isNotStarted = !hasWork && !isCompleted && !isDelayed;
+    const displayStatus = isNotStarted ? 'No empezada' : order.status;
+    const accentColor = isCompleted ? 'bg-emerald-500' : isDelayed ? 'bg-red-500' : isNotStarted ? 'bg-slate-400' : 'bg-amber-500';
+    const cardBg = isCompleted ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400'
+      : isDelayed ? 'bg-red-50/60 border-red-200 hover:border-red-400'
+      : isNotStarted ? 'bg-slate-50/60 border-slate-200 hover:border-indigo-400'
+      : 'bg-amber-50/40 border-amber-200 hover:border-indigo-400';
+    const statusColor = isCompleted ? 'text-emerald-600' : isDelayed ? 'text-red-600' : isNotStarted ? 'text-slate-400' : 'text-amber-600';
+    const StatusIcon = isCompleted ? CheckCircle2 : isDelayed ? AlertCircle : isNotStarted ? Archive : Clock;
+
+    const backorders = (!isReadOnly && checkOrderIncomplete(order)) ? getBackorders(order) : [];
 
     return (
-      <div 
-        key={order.id} 
+      <div
+        key={order.id}
         onClick={() => openFullDetails(order)}
-        className={`rounded-2xl border-2 transition-all w-full sm:w-[320px] flex-shrink-0 hover:shadow-xl cursor-pointer relative overflow-hidden group ${isDelayed ? 'bg-red-50/60 border-red-200 hover:border-red-400' : isCompleted ? 'bg-emerald-50/50 border-emerald-200 hover:border-emerald-400' : 'bg-amber-50/40 border-amber-200 hover:border-indigo-400'}`}
+        className={`rounded-2xl border-2 transition-all w-full sm:w-[320px] flex-shrink-0 hover:shadow-xl cursor-pointer relative overflow-hidden group ${cardBg}`}
       >
-        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${isCompleted ? 'bg-emerald-500' : isDelayed ? 'bg-red-500' : 'bg-amber-500'}`} />
-        <div className="p-5">
-          <div className="flex justify-between items-start mb-4">
-            <div>
-              <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 mb-1 ${isCompleted ? 'text-emerald-600' : isDelayed ? 'text-red-600' : 'text-amber-600'}`}>
-                {isCompleted ? <CheckCircle2 className="w-3 h-3" /> : isDelayed ? <AlertCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                {order.status}
+        <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${accentColor}`} />
+
+        <div className="pl-4 pr-3 pt-3 pb-3">
+          {/* Row 1: status + stats + actions */}
+          <div className="flex items-start justify-between gap-2">
+            {/* Left: status + order id */}
+            <div className="min-w-0">
+              <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 mb-0.5 ${statusColor}`}>
+                <StatusIcon className="w-3 h-3 shrink-0" />
+                {displayStatus}
               </span>
-              <div className="flex items-center gap-1.5">
-                <h3 className="text-slate-900 font-extrabold text-base group-hover:text-indigo-600 transition-colors">{order.id}</h3>
+              <div className="flex items-center gap-1">
+                <h3 className="text-slate-900 font-extrabold text-base leading-tight group-hover:text-indigo-600 transition-colors truncate">{order.id}</h3>
                 <button
                   onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
-                  title="Copiar número de orden"
-                  className="p-0.5 text-slate-300 hover:text-indigo-500 transition-colors opacity-0 group-hover:opacity-100"
-                ><Copy className="w-3.5 h-3.5"/></button>
+                  title="Copiar"
+                  className="p-0.5 text-slate-300 hover:text-indigo-500 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                ><Copy className="w-3 h-3"/></button>
               </div>
             </div>
-            {!isReadOnly && (
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => openQuickEdit(order)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-4 h-4" /></button>
-                <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Delete"><Trash2 className="w-4 h-4" /></button>
-              </div>
-            )}
-          </div>
-          
-          {checkOrderIncomplete(order) && !isReadOnly && (
-             <div className="mt-2 space-y-0.5 mb-2">
-                {getBackorders(order).map((bo, idx) => (
-                  <p key={idx} className="text-[11px] text-red-600 font-bold uppercase tracking-wider">
-                    BO: Line {bo.lineNo} (Missing {bo.missingQty > 0 ? bo.missingQty + ' pcs' : bo.missingBoxes + ' bxs/plts'})
+
+            {/* Right: stats column */}
+            <div className="shrink-0 text-right">
+              <div className="flex gap-2">
+                <div className="text-center">
+                  <p className="text-[8px] font-black text-slate-400 uppercase">Plts</p>
+                  <p className="text-sm font-black text-slate-900 leading-tight">
+                    {totalP}{order.loomPallets ? <span className="text-[9px] text-gray-400 font-medium"> ({order.loomPallets}Lm)</span> : ""}
                   </p>
-                ))}
-             </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-[8px] font-black text-slate-400 uppercase">Boxes</p>
+                  <p className="text-sm font-black text-slate-900 leading-tight">{Number(order.boxes||0).toLocaleString()}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[8px] font-black text-slate-400 uppercase">Lbs</p>
+                  <p className="text-sm font-black text-slate-900 leading-tight">{Number(order.weight||0).toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: PO + Truck */}
+          <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-0.5 text-[12px] text-slate-500">
+            <span><span className="font-medium">PO:</span> <span className="text-slate-800 font-bold">{order.po || "N/A"}</span></span>
+            <span><span className="font-medium">Truck:</span> <span className="text-slate-800 font-bold">{order.truckId || "Unassigned"}</span></span>
+          </div>
+
+          {/* Row 3: Notes (if any) */}
+          {order.notes && (
+            <p className="mt-1.5 text-[11px] text-slate-500 italic line-clamp-2 leading-snug">{order.notes}</p>
           )}
 
-          <div className="space-y-1.5 text-[13px] text-slate-500 border-t border-slate-100 pt-4">
-            <div className="flex justify-between"><span className="font-medium">PO:</span> <span className="text-slate-800 font-bold">{order.po || "N/A"}</span></div>
-            <div className="flex justify-between"><span className="font-medium">Truck:</span> <span className="text-slate-800 font-bold">{order.truckId || "Unassigned"}</span></div>
-            {order.notes && <p className="text-[12px] text-slate-500 italic border-t border-slate-100 pt-2 mt-1 line-clamp-2">{order.notes}</p>}
-            <div className="flex gap-3 mt-3">
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Plts</p><p className="font-black text-slate-900">{totalP} {order.loomPallets ? <span className="text-[10px] text-gray-500 font-medium">({order.loomPallets} Lm)</span> : ""}</p></div>
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Boxes</p><p className="font-black text-slate-900">{Number(order.boxes||0).toLocaleString()}</p></div>
-               <div className="flex-1 bg-slate-50 p-2 rounded-xl text-center"><p className="text-[9px] font-black text-slate-400 uppercase">Lbs</p><p className="font-black text-slate-900">{Number(order.weight||0).toLocaleString()}</p></div>
+          {/* Row 4: Backorders (if any) */}
+          {backorders.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {backorders.map((bo, idx) => (
+                <span key={idx} className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">
+                  BO L{bo.lineNo}: -{bo.missingQty > 0 ? bo.missingQty + 'pcs' : bo.missingBoxes + 'bxs'}
+                </span>
+              ))}
             </div>
-          </div>
+          )}
+
+          {/* Edit/Delete actions */}
+          {!isReadOnly && (
+            <div className="flex gap-1 justify-end mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => openQuickEdit(order)} className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+            </div>
+          )}
         </div>
       </div>
     );
