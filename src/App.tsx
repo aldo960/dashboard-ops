@@ -641,9 +641,25 @@ export default function App() {
     if (!editingOrder || !newItemNumberForm.trim()) return;
     const currentLines = editingOrder.masterItems || [];
     const nextLineNo = currentLines.length > 0 ? Math.max(...currentLines.map(m => parseInt(m.lineNo) || 0)) + 1 : 1;
-    const newMaster: MasterItem = { id: `m_${Date.now()}`, lineNo: nextLineNo.toString(), itemNumber: newItemNumberForm, orderedBoxes: 0, orderedQty: 0 };
-    setEditingOrder({ ...editingOrder, masterItems: [...currentLines, newMaster] });
-    setNewItemNumberForm("");
+    const trimmed = newItemNumberForm.trim();
+
+    const doAdd = () => {
+      const newMaster: MasterItem = { id: `m_${Date.now()}`, lineNo: nextLineNo.toString(), itemNumber: trimmed, orderedBoxes: 0, orderedQty: 0 };
+      setEditingOrder({ ...editingOrder, masterItems: [...currentLines, newMaster] });
+      setNewItemNumberForm("");
+    };
+
+    const duplicate = currentLines.find(m => m.itemNumber.trim().toLowerCase() === trimmed.toLowerCase());
+    if (duplicate) {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Item duplicado",
+        message: `El item "${trimmed}" ya fue agregado en la Línea ${duplicate.lineNo}. ¿Deseas agregarlo de todas formas?`,
+        onConfirm: () => { doAdd(); setConfirmDialog(null); }
+      });
+    } else {
+      doAdd();
+    }
   };
 
   const handleUpdateMasterItem = (id: string, field: keyof MasterItem, value: any) => {
@@ -1710,17 +1726,29 @@ export default function App() {
             {detailsTab === 'items' && (
                <div className="bg-white border border-gray-200 rounded-md p-8 shadow-sm animate-in fade-in max-w-3xl">
                   <h2 className="text-xl font-bold text-gray-800 mb-6">Item Verification (Order {editingOrder.id})</h2>
-                  <div className="flex gap-4 mb-8 bg-gray-50 p-4 rounded border border-gray-200">
-                     <input 
-                       value={newItemNumberForm} 
-                       onChange={e => setNewItemNumberForm(e.target.value)} 
-                       onKeyDown={e => { if(e.key === 'Enter') handleAddMasterItem() }}
-                       placeholder="Press Enter or Add to List" 
-                       className="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500" 
-                       autoFocus
-                     />
-                     <button onClick={handleAddMasterItem} className="bg-white border border-gray-300 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-gray-50"><Plus className="w-4 h-4"/> Add to List</button>
-                  </div>
+                  {(() => {
+                    const currentLines = editingOrder.masterItems || [];
+                    const nextLineNo = currentLines.length > 0 ? Math.max(...currentLines.map(m => parseInt(m.lineNo) || 0)) + 1 : 1;
+                    return (
+                      <div className="mb-8">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm text-gray-500 font-medium">Agregando:</span>
+                          <span className="bg-blue-600 text-white text-sm font-bold px-3 py-0.5 rounded-full">Línea {nextLineNo}</span>
+                        </div>
+                        <div className="flex gap-4 bg-gray-50 p-4 rounded border border-gray-200">
+                          <input
+                            value={newItemNumberForm}
+                            onChange={e => setNewItemNumberForm(e.target.value)}
+                            onKeyDown={e => { if(e.key === 'Enter') handleAddMasterItem() }}
+                            placeholder="Press Enter or Add to List"
+                            className="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-blue-500"
+                            autoFocus
+                          />
+                          <button onClick={handleAddMasterItem} className="bg-white border border-gray-300 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-gray-50"><Plus className="w-4 h-4"/> Add to List</button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <h3 className="text-sm font-bold text-gray-500 mb-2">Defined Lines:</h3>
                   <table className="w-full text-sm text-left border border-gray-200">
                     <thead className="bg-gray-100 text-gray-600">
