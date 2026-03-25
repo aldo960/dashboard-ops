@@ -96,7 +96,7 @@ interface Order {
 
 interface TruckData {
   id: string;
-  summary: { pallets: number; weight: string; boxes: number; };
+  summary: { pallets: number; normalPallets: number; loomPallets: number; weight: string; boxes: number; };
   orders: Order[];
 }
 
@@ -108,6 +108,7 @@ interface DateGroup {
 interface EditContext {
   orderId: string;
 }
+
 
 // --- Helpers ---
 const formatForInput = (usDate: string) => {
@@ -169,30 +170,32 @@ const getMockOrders = (): Order[] => {
   ];
 };
 
-// --- Pac-Man Scene Logo ---
-function PacManScene({ className = "" }: { className?: string }) {
-  const gp = (x: number, y: number) =>
-    `M ${x},${y+14} L ${x},${y+5} Q ${x},${y} ${x+5},${y} Q ${x+10},${y} ${x+10},${y+5} L ${x+10},${y+14} Q ${x+8.5},${y+12} ${x+6.7},${y+14} Q ${x+5},${y+12} ${x+3.3},${y+14} Q ${x+1.7},${y+12} ${x},${y+14} Z`;
-  const ghosts = [
-    { x: 0, color: "#FF0000" },
-    { x: 14, color: "#FFB8FF" },
-    { x: 28, color: "#00FFFF" },
-  ];
+
+// --- Rabbit Logo ---
+function RabbitLogo({ className = "" }: { className?: string }) {
+  const C = "#3b1c78"; // dark purple
+  const P = "#f9b8c8"; // pink
   return (
-    <svg viewBox="0 0 90 22" className={className} xmlns="http://www.w3.org/2000/svg">
-      {ghosts.map(({ x, color }) => (
-        <g key={x}>
-          <path d={gp(x, 4)} fill={color}/>
-          <circle cx={x+2.8} cy={9.5} r={1.9} fill="white"/>
-          <circle cx={x+7.2} cy={9.5} r={1.9} fill="white"/>
-          <circle cx={x+3.5} cy={10} r={1} fill="#1a1aff"/>
-          <circle cx={x+7.9} cy={10} r={1} fill="#1a1aff"/>
-        </g>
-      ))}
-      {[40, 46, 52, 58, 64].map(cx => (
-        <circle key={cx} cx={cx} cy={11} r={1.3} fill="#FFD700" opacity="0.85"/>
-      ))}
-      <path fill="#FFD700" d="M 75,11 L 66.3,8.7 A 9,9 0 1,1 66.3,13.3 Z"/>
+    <svg viewBox="0 0 100 100" className={className} xmlns="http://www.w3.org/2000/svg">
+      {/* Left ear */}
+      <rect x="28" y="3"   width="15" height="42" rx="7.5" fill={C}/>
+      <rect x="31.5" y="7" width="8"  height="32" rx="4"   fill={P}/>
+      {/* Right ear */}
+      <rect x="57" y="3"   width="15" height="42" rx="7.5" fill={C}/>
+      <rect x="60.5" y="7" width="8"  height="32" rx="4"   fill={P}/>
+      {/* Body */}
+      <rect x="19" y="30" width="62" height="60" rx="16" fill={C}/>
+      {/* Cheeks */}
+      <circle cx="37.5" cy="55" r="9" fill={P}/>
+      <circle cx="62.5" cy="55" r="9" fill={P}/>
+      {/* Left sparkles */}
+      <line x1="11" y1="39" x2="16" y2="46" stroke={C} strokeWidth="3.5" strokeLinecap="round"/>
+      <line x1="7"  y1="52" x2="16" y2="52" stroke={C} strokeWidth="3.5" strokeLinecap="round"/>
+      <line x1="11" y1="65" x2="16" y2="58" stroke={C} strokeWidth="3.5" strokeLinecap="round"/>
+      {/* Right sparkles */}
+      <line x1="89" y1="39" x2="84" y2="46" stroke={C} strokeWidth="3.5" strokeLinecap="round"/>
+      <line x1="93" y1="52" x2="84" y2="52" stroke={C} strokeWidth="3.5" strokeLinecap="round"/>
+      <line x1="89" y1="65" x2="84" y2="58" stroke={C} strokeWidth="3.5" strokeLinecap="round"/>
     </svg>
   );
 }
@@ -223,17 +226,22 @@ export default function App() {
   
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // --- Concurrent Edit Merge ---
-  const [pendingRemoteUpdate, setPendingRemoteUpdate] = useState<Order | null>(null);
+  // --- Order History ---
+
+  // --- Concurrent Edit Merge (silent — UI suppressed, state kept for realtime logic) ---
+  const [, setPendingRemoteUpdate] = useState<Order | null>(null);
   const editingOrderRef = useRef<Order | null>(null);
   const isSavingRef = useRef(false);
   const savingCountRef = useRef(0);
+  const refetchTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => { editingOrderRef.current = editingOrder; }, [editingOrder]);
 
   // --- Pallet Form States ---
   const [editingPalletId, setEditingPalletId] = useState<string | null>(null);
   const [movingPalletId, setMovingPalletId] = useState<string | null>(null);
   const [targetPosition, setTargetPosition] = useState<number>(1);
+  const [movingLineItemId, setMovingLineItemId] = useState<string | null>(null);
+  const [targetPalletNumber, setTargetPalletNumber] = useState<number>(1);
   const [lineItemForm, setLineItemForm] = useState<PalletLineItem>({ id: "", lineNo: "", itemNumber: "", boxes: 0, qtyPerBox: 0 });
   const [editingLineItemId, setEditingLineItemId] = useState<string | null>(null);
   
@@ -246,11 +254,19 @@ export default function App() {
   const [detailsTab, setDetailsTab] = useState<'general' | 'packing_list' | 'weight_sheet' | 'items' | 'order_check'>('general');
   const [expandedCheckLines, setExpandedCheckLines] = useState<Record<string, boolean>>({});
   const [newItemNumberForm, setNewItemNumberForm] = useState("");
+  const [newItemTargetQtyForm, setNewItemTargetQtyForm] = useState<number>(0);
+  const [editingMasterItemId, setEditingMasterItemId] = useState<string | null>(null);
+  const itemsEndRef = useRef<HTMLDivElement>(null);
 
-  const [printMode, setPrintMode] = useState<'none' | 'labels_all' | 'pallet_sheets_all' | 'packing_list' | 'weight_sheet' | 'label_single' | 'pallet_sheet_single' | 'truck_report'>('none');
+  const [printMode, setPrintMode] = useState<'none' | 'labels_all' | 'pallet_sheets_all' | 'packing_list' | 'weight_sheet' | 'label_single' | 'pallet_sheet_single' | 'truck_report' | 'consolidation_form' | 'label_4x2' | 'label_4x4'>('none');
+  const [labelContent, setLabelContent] = useState('');
+  const [labelSize, setLabelSize] = useState<'4x2' | '4x4'>('4x2');
   const [printTargetPallet, setPrintTargetPallet] = useState<PalletItem | null>(null);
   const [reportDate, setReportDate] = useState(getTodayUSFormat());
-
+  const [todos, setTodos] = useState<any[]>([]);
+  const [showPalletTodoForm, setShowPalletTodoForm] = useState(false);
+  const [isTasksExpanded, setIsTasksExpanded] = useState(true);
+  const [palletTodoForm, setPalletTodoForm] = useState({ lot_number: '', boxes: '', qty_per_box: '', total_pcs: '', original_bin: '', action_required: '', total_manual: false });
   // --- Supabase Auth: restore session on load ---
   useEffect(() => {
     if (IS_PLACEHOLDER_CREDENTIALS) return;
@@ -277,13 +293,48 @@ export default function App() {
     // No intentar cargar datos hasta que el usuario esté autenticado
     if (!currentUser) return;
 
+    // Helper: map DB row (with joined pallets/pallet_items/order_items) → Order interface
+    const mapOrderFromDB = (data: any): Order => {
+      const { pallets: palletsArr, order_items: orderItemsArr, ...orderFields } = data;
+      return {
+        ...orderFields,
+        palletList: ((palletsArr || []) as any[])
+          .sort((a: any, b: any) => a.number - b.number)
+          .map((p: any) => ({
+            id: p.id,
+            number: p.number,
+            weight: p.weight || '0.00',
+            boxes: ((p.pallet_items || []) as any[]).reduce((s: number, i: any) => s + (Number(i.boxes) || 0), 0),
+            items: ((p.pallet_items || []) as any[]).map((i: any) => ({
+              id: i.id,
+              lineNo: i.line_no || '',
+              itemNumber: i.item_number || '',
+              boxes: i.boxes || 0,
+              qtyPerBox: i.qty_per_box || 0,
+              addedBy: i.added_by || '',
+            })),
+          })),
+        masterItems: ((orderItemsArr || []) as any[])
+          .sort((a: any, b: any) => parseInt(a.line_no) - parseInt(b.line_no))
+          .map((m: any) => ({
+            id: m.id,
+            lineNo: m.line_no || '',
+            itemNumber: m.item_number || '',
+            orderedBoxes: m.ordered_boxes || 0,
+            orderedQty: m.ordered_qty || 0,
+          })),
+      };
+    };
+
     const fetchOrders = async () => {
       try {
-        const { data, error } = await supabase!.from('orders').select('*');
+        const { data, error } = await supabase!
+          .from('orders')
+          .select('*, pallets(*, pallet_items(*)), order_items(*)');
         if (error) throw error;
 
         if (data && data.length > 0) {
-          setOrders(data as Order[]);
+          setOrders(data.map(mapOrderFromDB));
           setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true }));
         } else {
           // BD vacía: cargar datos de ejemplo para demostración
@@ -293,30 +344,71 @@ export default function App() {
         }
       } catch (err) {
         console.error("Error al obtener datos de Supabase:", err);
-        // Fallback a datos locales si Supabase no responde
         setOrders(prev => (prev.length === 0 ? getMockOrders() : prev));
         setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true, "12/25/2026": true }));
       }
     };
 
+    // Helper: re-fetch a single order and update state (used by realtime handlers)
+    const refetchOrderData = async (orderId: string) => {
+      if (!supabase) return;
+      try {
+        const { data } = await supabase
+          .from('orders')
+          .select('*, pallets(*, pallet_items(*)), order_items(*)')
+          .eq('id', orderId)
+          .single();
+        if (data) {
+          const mapped = mapOrderFromDB(data);
+          // Always update the orders list so the dashboard reflects new totals
+          setOrders(prev => prev.map(o => o.id === orderId ? mapped : o));
+          // Only notify of remote change if the user has this order open and we're not the ones saving
+          if (editingOrderRef.current?.id === orderId && !isSavingRef.current) {
+            setPendingRemoteUpdate(mapped);
+          }
+        }
+      } catch (err) {
+        console.error("Error refetching order:", err);
+      }
+    };
+
+    // Debounced wrapper — prevents a flood of DB reads when 20 items arrive in quick succession
+    const debouncedRefetch = (orderId: string) => {
+      clearTimeout(refetchTimersRef.current[orderId]);
+      refetchTimersRef.current[orderId] = setTimeout(() => refetchOrderData(orderId), 800);
+    };
+
     fetchOrders();
 
-    // Suscripción a cambios en tiempo real en la tabla "orders"
+    const fetchTodos = async () => {
+      const { data } = await supabase!.from('warehouse_todos').select('*').order('created_at', { ascending: false });
+      if (data) setTodos(data);
+    };
+    fetchTodos();
+
+    // Suscripción a cambios en tiempo real en las 3 tablas
     const channel = supabase!
-      .channel('public:orders')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, (payload) => {
-        const incoming = payload.new as Order;
-        if (editingOrderRef.current && incoming.id === editingOrderRef.current.id && !isSavingRef.current) {
-          // Solo avisa — el usuario decide cuándo fusionar
-          setPendingRemoteUpdate(incoming);
-        }
-        fetchOrders();
+      .channel('public:all-tables')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => {
+        if (!isSavingRef.current) fetchOrders();
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => {
-        fetchOrders();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, () => { fetchOrders(); })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'orders' }, () => { fetchOrders(); })
+      // Pallets — debounced refetch so 20 inserts don't fire 20 DB reads
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pallets' }, (payload) => {
+        const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+        if (orderId) debouncedRefetch(orderId);
       })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'orders' }, () => {
-        fetchOrders();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pallet_items' }, (payload) => {
+        const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+        if (orderId) debouncedRefetch(orderId);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, (payload) => {
+        const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+        if (orderId) debouncedRefetch(orderId);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_todos' }, () => {
+        fetchTodos();
       })
       .subscribe();
 
@@ -325,35 +417,46 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Merges two versions of an order: pallets/items combined from both,
-  // header fields (truck, notes, status, etc.) prefer LOCAL since user is actively editing.
-  const mergeOrders = (incoming: Order, local: Order): Order => {
-    const incomingPalletIds = new Set((incoming.palletList || []).map(p => p.id));
-    const localOnlyPallets = (local.palletList || []).filter(p => !incomingPalletIds.has(p.id));
-    const mergedPallets = [...(incoming.palletList || []), ...localOnlyPallets]
-      .map((p, i) => ({ ...p, number: i + 1 }));
+  // Refresh data when user returns to the browser tab (catches missed realtime events)
+  useEffect(() => {
+    if (!currentUser || !supabase) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        supabase.from('orders').select('*, pallets(*, pallet_items(*)), order_items(*)').then(({ data }) => {
+          if (data) setOrders(data.map((d: any) => {
+            const { pallets: palletsArr, order_items: orderItemsArr, ...orderFields } = d;
+            return {
+              ...orderFields,
+              palletList: ((palletsArr || []) as any[]).sort((a: any,b: any) => a.number - b.number).map((p: any) => ({
+                id: p.id, number: p.number, weight: p.weight || '0.00',
+                boxes: ((p.pallet_items || []) as any[]).reduce((s: number, i: any) => s + (Number(i.boxes)||0), 0),
+                items: ((p.pallet_items || []) as any[]).map((i: any) => ({ id: i.id, lineNo: i.line_no||'', itemNumber: i.item_number||'', boxes: i.boxes||0, qtyPerBox: i.qty_per_box||0, addedBy: i.added_by||'' })),
+              })),
+              masterItems: ((orderItemsArr || []) as any[]).sort((a: any,b: any) => parseInt(a.line_no)-parseInt(b.line_no)).map((m: any) => ({ id: m.id, lineNo: m.line_no||'', itemNumber: m.item_number||'', orderedBoxes: m.ordered_boxes||0, orderedQty: m.ordered_qty||0 })),
+            };
+          }));
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    // Also refresh every 3 minutes as a safety net
+    const interval = setInterval(onVisible, 3 * 60 * 1000);
+    return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval); };
+  }, [currentUser]);
 
-    const incomingItemIds = new Set((incoming.masterItems || []).map(m => m.id));
-    const localOnlyItems = (local.masterItems || []).filter(m => !incomingItemIds.has(m.id));
-    const mergedItems = [...(incoming.masterItems || []), ...localOnlyItems];
-
-    // Start with incoming (colleague's data), then override with local edits,
-    // then apply the merged pallet/item lists.
-    return { ...incoming, ...local, palletList: mergedPallets, masterItems: mergedItems };
-  };
-
-  const saveOrderToCloud = async (order: Order) => {
+const saveOrderToCloud = async (order: Order) => {
     if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
+    // Strip normalized fields — they live in pallets/pallet_items/order_items tables now
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { palletList, masterItems, ...orderFields } = order;
     savingCountRef.current++;
     isSavingRef.current = true;
     try {
-      const { error } = await supabase.from('orders').upsert(order, { onConflict: 'id' });
+      const { error } = await supabase.from('orders').upsert(orderFields, { onConflict: 'id' });
       if (error) throw error;
     } catch (err) {
       console.error("Error guardando orden en Supabase:", err);
     } finally {
-      // Espera a que llegue el evento real-time, luego decrementa.
-      // isSavingRef solo se apaga cuando TODOS los saves pendientes terminen.
       setTimeout(() => {
         savingCountRef.current = Math.max(0, savingCountRef.current - 1);
         if (savingCountRef.current === 0) isSavingRef.current = false;
@@ -381,9 +484,20 @@ export default function App() {
       (o.masterItems || []).some(m => (m.itemNumber || '').toLowerCase().includes(searchLower))
     );
 
-    // 2. Separate delayed
-    const delayed = filtered.filter(o => o.status === 'Delayed');
-    const active = filtered.filter(o => o.status !== 'Delayed');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // 2. Separate delayed — explicit 'Delayed' status OR auto-classify past non-completed orders
+    const delayed = filtered.filter(o => {
+      if (o.status === 'Delayed') return true;
+      if (o.status === 'Completed') return false;
+      if (o.shipmentDate) {
+        const d = parseDateStr(o.shipmentDate);
+        return !isNaN(d.getTime()) && d < today;
+      }
+      return false;
+    });
+    const active = filtered.filter(o => !delayed.includes(o));
 
     // 3. Dynamically group by Date -> Truck
     const groups: Record<string, Record<string, Order[]>> = {};
@@ -395,9 +509,6 @@ export default function App() {
       groups[dStr][tStr].push(o);
     });
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Ignore time, only compare dates
-
     const activeGroups: DateGroup[] = [];
     const pastGroups: DateGroup[] = [];
 
@@ -408,9 +519,26 @@ export default function App() {
         id: tid,
         orders: ords,
         summary: {
-          pallets: ords.reduce((s, o) => s + (Number(o.pallets)||0), 0),
-          boxes: ords.reduce((s, o) => s + (Number(o.boxes)||0), 0),
-          weight: ords.reduce((s, o) => s + parseFloat(String(o.weight||"0").replace(/,/g, '')||"0"), 0).toFixed(2)
+          pallets: ords.reduce((s, o) => {
+            if (o.isManualOverride) return s + (Number(o.pallets) || 0);
+            return s + (o.palletList?.length || 0);
+          }, 0),
+          normalPallets: ords.reduce((s, o) => {
+            if (o.isManualOverride) return s + (Number(o.normalPallets) || 0);
+            return s + (o.palletList?.filter(p => !isLoomPallet(p)).length || 0);
+          }, 0),
+          loomPallets: ords.reduce((s, o) => {
+            if (o.isManualOverride) return s + (Number(o.loomPallets) || 0);
+            return s + (o.palletList?.filter(p => isLoomPallet(p)).length || 0);
+          }, 0),
+          boxes: ords.reduce((s, o) => {
+            if (o.isManualOverride) return s + (Number(o.boxes) || 0);
+            return s + (o.palletList?.reduce((bs, p) => bs + (Number(p.boxes) || 0), 0) || 0) + (Number(o.looseBoxes) || 0);
+          }, 0),
+          weight: ords.reduce((s, o) => {
+            if (o.isManualOverride) return s + parseFloat(String(o.weight || "0").replace(/,/g, '') || "0");
+            return s + (o.palletList?.reduce((ws, p) => ws + parseFloat(String(p.weight || "0").replace(/,/g, '') || "0"), 0) || 0);
+          }, 0).toFixed(2)
         }
       })).sort((a, b) => a.id.localeCompare(b.id));
 
@@ -430,7 +558,7 @@ export default function App() {
     return { activeDates: activeGroups, pastCompletedDates: pastGroups, delayedOrdersList: delayed };
   }, [orders, searchTerm]);
 
-  // --- Auto-Save Effect (Updates UI locally instantly) ---
+  // --- Auto-Save Effect (Updates UI locally instantly, debounces cloud save) ---
   useEffect(() => {
     if (!editingOrder) return;
     // If ID changed in Quick Edit, skip auto-save — explicit Save button handles it
@@ -445,7 +573,7 @@ export default function App() {
       list.forEach(p => { if (isLoomPallet(p)) loomP++; else normalP++; });
       const weightSum = list.reduce((s, p) => s + parseFloat(String(p.weight || "0").replace(/,/g, '')||"0"), 0);
       const boxSum = list.reduce((s, p) => s + (Number(p.boxes)||0), 0) + (Number(finalOrder.looseBoxes) || 0);
-      
+
       if (finalOrder.pallets !== list.length || finalOrder.boxes !== boxSum || finalOrder.weight !== weightSum.toFixed(2) || finalOrder.normalPallets !== normalP || finalOrder.loomPallets !== loomP) {
         finalOrder.pallets = list.length;
         finalOrder.normalPallets = normalP;
@@ -457,14 +585,20 @@ export default function App() {
     }
 
     if (updatedTotals) {
-      setEditingOrder(finalOrder); 
-      return; 
+      setEditingOrder(finalOrder);
+      return;
     }
 
-    // Optimistic update: makes the card jump immediately to another truck
+    // Optimistic update: runs immediately so the UI feels instant
     setOrders(prev => prev.map(o => o.id === finalOrder.id ? finalOrder : o));
-    // Cloud save
-    saveOrderToCloud(finalOrder);
+
+    // Debounced cloud save: waits 1500ms after the last change before hitting Supabase
+    const timer = setTimeout(() => {
+      saveOrderToCloud(finalOrder);
+    }, 1500);
+
+    // Cleanup: cancels the pending save if editingOrder changes again before 1500ms
+    return () => clearTimeout(timer);
   }, [editingOrder]);
 
   // --- Totals Functions ---
@@ -520,7 +654,7 @@ export default function App() {
       const packedBoxes = getPackedBoxesForLine(m.lineNo, order);
       const mQty = Number(m.orderedQty) || 0;
       const mBoxes = Number(m.orderedBoxes) || 0;
-      if ((mQty > 0 && packedQty < mQty) || (mBoxes > 0 && packedBoxes < mBoxes)) {
+      if (mBoxes > 0 && ((mQty > 0 && packedQty < mQty) || packedBoxes < mBoxes)) {
         backorders.push({ lineNo: m.lineNo, missingQty: Math.max(0, mQty - packedQty), missingBoxes: Math.max(0, mBoxes - packedBoxes) });
       }
     });
@@ -662,16 +796,7 @@ export default function App() {
     setEditingOrder(updated);
   };
 
-  const handleOrderCheckKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const inputs = Array.from(document.querySelectorAll('.order-check-input')) as HTMLInputElement[];
-      const index = inputs.indexOf(e.currentTarget);
-      if (index >= 0 && index < inputs.length - 1) inputs[index + 1].focus();
-    }
-  };
-
-  const toggleDate = (date: string, trucks?: TruckData[]) => {
+const toggleDate = (date: string, trucks?: TruckData[]) => {
     const isOpening = !expandedDates[date];
     setExpandedDates(p => ({ ...p, [date]: !p[date] }));
     // When expanding a date, also expand all its trucks automatically
@@ -684,16 +809,36 @@ export default function App() {
   const toggleTruck = (date: string, tid: string) => setExpandedTrucks(p => ({ ...p, [`${date}-${tid}`]: !p[`${date}-${tid}`] }));
 
   // --- Master Items ---
-  const handleAddMasterItem = () => {
+  const handleAddMasterItem = async () => {
     if (!editingOrder || !newItemNumberForm.trim()) return;
-    const currentLines = editingOrder.masterItems || [];
-    const nextLineNo = currentLines.length > 0 ? Math.max(...currentLines.map(m => parseInt(m.lineNo) || 0)) + 1 : 1;
     const trimmed = newItemNumberForm.trim();
 
-    const doAdd = () => {
-      const newMaster: MasterItem = { id: `m_${Date.now()}`, lineNo: nextLineNo.toString(), itemNumber: trimmed, orderedBoxes: 0, orderedQty: 0 };
+    // EDIT MODE: update existing item
+    if (editingMasterItemId) {
+      await handleUpdateMasterItem(editingMasterItemId, 'itemNumber', trimmed);
+      await handleUpdateMasterItem(editingMasterItemId, 'orderedQty', newItemTargetQtyForm || 0);
+      setNewItemNumberForm("");
+      setNewItemTargetQtyForm(0);
+      setEditingMasterItemId(null);
+      setTimeout(() => (document.getElementById('item-number-input') as HTMLInputElement)?.focus(), 50);
+      return;
+    }
+
+    // ADD MODE
+    const currentLines = editingOrder.masterItems || [];
+    const nextLineNo = currentLines.length > 0 ? Math.max(...currentLines.map(m => parseInt(m.lineNo) || 0)) + 1 : 1;
+
+    const doAdd = async () => {
+      const newMaster: MasterItem = { id: `m_${Date.now()}`, lineNo: nextLineNo.toString(), itemNumber: trimmed, orderedBoxes: 0, orderedQty: newItemTargetQtyForm || 0 };
       setEditingOrder({ ...editingOrder, masterItems: [...currentLines, newMaster] });
       setNewItemNumberForm("");
+      setNewItemTargetQtyForm(0);
+      setTimeout(() => (document.getElementById('item-number-input') as HTMLInputElement)?.focus(), 50);
+      if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+        isSavingRef.current = true; savingCountRef.current++;
+        await supabase.from('order_items').insert({ id: newMaster.id, order_id: editingOrder.id, line_no: newMaster.lineNo, item_number: newMaster.itemNumber, ordered_boxes: 0, ordered_qty: newMaster.orderedQty });
+        setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+      }
     };
 
     const duplicate = currentLines.find(m => m.itemNumber.trim().toLowerCase() === trimmed.toLowerCase());
@@ -705,58 +850,155 @@ export default function App() {
         onConfirm: () => { doAdd(); setConfirmDialog(null); }
       });
     } else {
-      doAdd();
+      await doAdd();
     }
   };
 
-  const handleUpdateMasterItem = (id: string, field: keyof MasterItem, value: any) => {
+  const handleUpdateMasterItem = async (id: string, field: keyof MasterItem, value: any) => {
     if (!editingOrder) return;
     setEditingOrder({ ...editingOrder, masterItems: editingOrder.masterItems?.map(m => m.id === id ? { ...m, [field]: value } : m) });
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      const dbField = field === 'lineNo' ? 'line_no' : field === 'itemNumber' ? 'item_number' : field === 'orderedBoxes' ? 'ordered_boxes' : field === 'orderedQty' ? 'ordered_qty' : field;
+      await supabase.from('order_items').update({ [dbField]: value }).eq('id', id);
+    }
   };
 
   const handleDeleteMasterItem = (id: string) => {
     if (!editingOrder) return;
     setConfirmDialog({
       isOpen: true, title: "Delete Item", message: "Are you sure you want to remove this item from the list?",
-      onConfirm: () => {
+      onConfirm: async () => {
         setEditingOrder({ ...editingOrder, masterItems: editingOrder.masterItems?.filter(m => m.id !== id) });
         setConfirmDialog(null);
+        if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+          isSavingRef.current = true; savingCountRef.current++;
+          await supabase.from('order_items').delete().eq('id', id);
+          setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+        }
       }
     });
   };
 
   // --- Pallet Functions ---
-  const handleAddPallet = () => {
+  const handleAddPallet = async () => {
     if (!editingOrder) return;
     const list = editingOrder.palletList || [];
     const nextNum = list.length > 0 ? Math.max(...list.map(p => p.number)) + 1 : 1;
     const newPallet: PalletItem = { id: `p_${Date.now()}`, number: nextNum, boxes: 0, weight: "0.00", items: [] };
+    // Optimistic update
     setEditingOrder({ ...editingOrder, palletList: [...list, newPallet] });
+    setEditingPalletId(newPallet.id);
+    // DB INSERT
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true;
+      savingCountRef.current++;
+      await supabase.from('pallets').insert({ id: newPallet.id, order_id: editingOrder.id, number: newPallet.number, weight: newPallet.weight, boxes: 0 });
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
   };
 
-  const executeDeletePallet = (pid: string) => {
+  const executeDeletePallet = async (pid: string) => {
     if (!editingOrder) return;
     const filteredList = editingOrder.palletList?.filter(p => p.id !== pid) || [];
     const reorganizedList = filteredList.map((p, index) => ({ ...p, number: index + 1 }));
     setEditingOrder({ ...editingOrder, palletList: reorganizedList });
     setConfirmDialog(null);
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true;
+      savingCountRef.current++;
+      // DELETE cascades to pallet_items automatically
+      await supabase.from('pallets').delete().eq('id', pid);
+      // Renumber remaining pallets
+      await Promise.all(reorganizedList.map(p => supabase!.from('pallets').update({ number: p.number }).eq('id', p.id)));
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
   };
 
-  const handleSaveLineItem = () => {
+  const handleSaveLineItem = async () => {
     if (!editingOrder || !editingPalletId || !lineItemForm.itemNumber) return;
-    setEditingOrder(prev => {
-      if (!prev) return prev;
-      const updatedPallets = prev.palletList?.map(p => {
-        if (p.id !== editingPalletId) return p;
-        const items = editingLineItemId 
-          ? (p.items || []).map(i => i.id === editingLineItemId ? { ...lineItemForm, addedBy: i.addedBy || currentUser || 'Unknown' } : i) 
-          : [...(p.items || []), { ...lineItemForm, id: `li_${Date.now()}`, addedBy: currentUser || 'Unknown' }];
-        return { ...p, items, boxes: items.reduce((s, i) => s + (Number(i.boxes)||0), 0) };
+    if (editingLineItemId) {
+      // UPDATE existing item
+      setEditingOrder(prev => {
+        if (!prev) return prev;
+        return { ...prev, palletList: prev.palletList?.map(p => p.id !== editingPalletId ? p : {
+          ...p,
+          items: p.items.map(i => i.id === editingLineItemId ? { ...lineItemForm, addedBy: i.addedBy || currentUser || 'Unknown' } : i),
+          boxes: p.items.map(i => i.id === editingLineItemId ? { ...lineItemForm } : i).reduce((s, i) => s + (Number(i.boxes) || 0), 0),
+        })};
       });
-      return { ...prev, palletList: updatedPallets };
-    });
+      if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+        isSavingRef.current = true; savingCountRef.current++;
+        await supabase.from('pallet_items').update({ line_no: lineItemForm.lineNo, item_number: lineItemForm.itemNumber, boxes: lineItemForm.boxes, qty_per_box: lineItemForm.qtyPerBox }).eq('id', editingLineItemId);
+        setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+      }
+    } else {
+      // INSERT new item
+      const newId = `li_${Date.now()}`;
+      const newItem: PalletLineItem = { ...lineItemForm, id: newId, addedBy: currentUser || 'Unknown' };
+      setEditingOrder(prev => {
+        if (!prev) return prev;
+        return { ...prev, palletList: prev.palletList?.map(p => p.id !== editingPalletId ? p : {
+          ...p,
+          items: [...p.items, newItem],
+          boxes: [...p.items, newItem].reduce((s, i) => s + (Number(i.boxes) || 0), 0),
+        })};
+      });
+      if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+        isSavingRef.current = true; savingCountRef.current++;
+        await supabase.from('pallet_items').insert({ id: newId, pallet_id: editingPalletId, order_id: editingOrder.id, line_no: lineItemForm.lineNo, item_number: lineItemForm.itemNumber, boxes: lineItemForm.boxes, qty_per_box: lineItemForm.qtyPerBox, added_by: currentUser || 'Unknown' });
+        setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+      }
+    }
     setLineItemForm({ id: "", lineNo: "", itemNumber: "", boxes: 0, qtyPerBox: 0 });
     setEditingLineItemId(null);
+    setTimeout(() => itemsEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  };
+
+  const handleDeleteLineItem = async (palletId: string, itemId: string) => {
+    if (!editingOrder) return;
+    setEditingOrder(prev => {
+      if (!prev) return prev;
+      return { ...prev, palletList: prev.palletList?.map(p => p.id !== palletId ? p : {
+        ...p,
+        items: p.items.filter(i => i.id !== itemId),
+        boxes: p.items.filter(i => i.id !== itemId).reduce((s, i) => s + (Number(i.boxes) || 0), 0),
+      })};
+    });
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
+      await supabase.from('pallet_items').delete().eq('id', itemId);
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
+  };
+
+  const handleMoveLineItem = async (itemId: string, sourcePalletId: string, destPalletNumber: number) => {
+    if (!editingOrder) return;
+    const destPallet = editingOrder.palletList?.find(p => p.number === destPalletNumber);
+    if (!destPallet || destPallet.id === sourcePalletId) { setMovingLineItemId(null); return; }
+    const item = editingOrder.palletList?.find(p => p.id === sourcePalletId)?.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    setEditingOrder(prev => {
+      if (!prev) return prev;
+      return { ...prev, palletList: prev.palletList?.map(p => {
+        if (p.id === sourcePalletId) {
+          const newItems = p.items.filter(i => i.id !== itemId);
+          return { ...p, items: newItems, boxes: newItems.reduce((s, i) => s + (Number(i.boxes) || 0), 0) };
+        }
+        if (p.id === destPallet.id) {
+          const newItems = [...p.items, item];
+          return { ...p, items: newItems, boxes: newItems.reduce((s, i) => s + (Number(i.boxes) || 0), 0) };
+        }
+        return p;
+      })};
+    });
+    setMovingLineItemId(null);
+
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
+      await supabase.from('pallet_items').update({ pallet_id: destPallet.id }).eq('id', itemId);
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
   };
 
   const handleLineNoChange = (val: string) => {
@@ -771,12 +1013,12 @@ export default function App() {
     setBulkForm(prev => ({ ...prev, lineNo: val, itemNo: masterItem ? masterItem.itemNumber : prev.itemNo }));
   };
 
-  const executeMovePallet = () => {
+  const executeMovePallet = async () => {
     if (!editingOrder || !editingOrder.palletList || !movingPalletId) return;
     const currentList = [...editingOrder.palletList];
     const currentIndex = currentList.findIndex(p => p.id === movingPalletId);
     if(currentIndex === -1) return;
-    
+
     let newPos = targetPosition - 1;
     if(newPos < 0) newPos = 0;
     if(newPos >= currentList.length) newPos = currentList.length - 1;
@@ -786,23 +1028,39 @@ export default function App() {
     const reorganizedList = currentList.map((p, index) => ({ ...p, number: index + 1 }));
     setEditingOrder({ ...editingOrder, palletList: reorganizedList });
     setMovingPalletId(null);
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
+      await Promise.all(reorganizedList.map(p => supabase!.from('pallets').update({ number: p.number }).eq('id', p.id)));
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
   };
 
-  const handleProcessBulkAdd = () => {
+  const handleProcessBulkAdd = async () => {
     if (!editingOrder) return;
     const list = [...(editingOrder.palletList || [])];
     let nextNum = list.length > 0 ? Math.max(...list.map(p => p.number)) + 1 : 1;
     const count = parseInt(bulkForm.numPallets) || 0;
     if (count <= 0) return;
 
-    for(let i=0; i<count; i++) {
-        const b = bulkTab === 'looms' ? 0 : parseInt(bulkForm.boxes) || 0; 
-        const q = bulkTab === 'looms' ? parseInt(bulkForm.loomSize) : parseInt(bulkForm.qtyPerBox) || 0;
-        const newItem: PalletLineItem = { id: `li_${Date.now()}_${i}`, lineNo: bulkForm.lineNo, itemNumber: bulkTab === 'looms' ? bulkForm.loomSize : bulkForm.itemNo, boxes: b, qtyPerBox: q, addedBy: currentUser || 'System' };
-        list.push({ id: `p_${Date.now()}_${i}`, number: nextNum++, boxes: b, weight: bulkTab === 'looms' ? bulkForm.weight : "0.00", items: [newItem] });
+    const newPallets: PalletItem[] = [];
+    const ts = Date.now();
+    for (let i = 0; i < count; i++) {
+      const b = bulkTab === 'looms' ? 0 : parseInt(bulkForm.boxes) || 0;
+      const q = bulkTab === 'looms' ? parseInt(bulkForm.loomSize) : parseInt(bulkForm.qtyPerBox) || 0;
+      const palletId = `p_${ts}_${i}`;
+      const newItem: PalletLineItem = { id: `li_${ts}_${i}`, lineNo: bulkForm.lineNo, itemNumber: bulkTab === 'looms' ? bulkForm.loomSize : bulkForm.itemNo, boxes: b, qtyPerBox: q, addedBy: currentUser || 'System' };
+      newPallets.push({ id: palletId, number: nextNum++, boxes: b, weight: bulkTab === 'looms' ? bulkForm.weight : "0.00", items: [newItem] });
     }
-    setEditingOrder({...editingOrder, palletList: list});
+
+    setEditingOrder({ ...editingOrder, palletList: [...list, ...newPallets].sort((a, b) => a.number - b.number) });
     setIsBulkModalOpen(false);
+
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
+      await supabase.from('pallets').insert(newPallets.map(p => ({ id: p.id, order_id: editingOrder.id, number: p.number, weight: p.weight, boxes: p.boxes })));
+      await supabase.from('pallet_items').insert(newPallets.flatMap(p => p.items.map(i => ({ id: i.id, pallet_id: p.id, order_id: editingOrder.id, line_no: i.lineNo, item_number: i.itemNumber, boxes: i.boxes, qty_per_box: i.qtyPerBox, added_by: i.addedBy }))));
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
   };
 
   // --- Print Functions ---
@@ -826,6 +1084,8 @@ export default function App() {
     const isDelayed = order.status === 'Delayed';
     const isCompleted = order.status === 'Completed';
     const totalP = order.isManualOverride ? order.pallets : (order.normalPallets || 0) + (order.loomPallets || 0);
+    const normalP = order.isManualOverride ? (order.normalPallets || 0) : (order.palletList?.filter(p => !isLoomPallet(p)).length || 0);
+    const loomP   = order.isManualOverride ? (order.loomPallets  || 0) : (order.palletList?.filter(p =>  isLoomPallet(p)).length || 0);
     const hasWork = totalP > 0 || (Number(order.looseBoxes) || 0) > 0;
 
     // Auto-derive display status: "No empezada" if nothing has been added yet
@@ -848,8 +1108,6 @@ export default function App() {
     const StatusIcon = isCompleted ? CheckCircle2 : isDelayed ? AlertCircle : isNotStarted ? Archive : Clock;
     const divider = isCompleted ? 'border-emerald-100' : isDelayed ? 'border-rose-100' : isNotStarted ? 'border-gray-100' : 'border-orange-100';
 
-    const backorders = (!isReadOnly && checkOrderIncomplete(order)) ? getBackorders(order) : [];
-
     return (
       <div
         key={order.id}
@@ -863,10 +1121,17 @@ export default function App() {
         <div className="flex-1 p-3 min-w-0">
           {/* Status + copy */}
           <div className="flex items-center justify-between mb-1">
-            <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${statusColor}`}>
-              <StatusIcon className="w-3 h-3 shrink-0" />
-              {displayStatus}
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${statusColor}`}>
+                <StatusIcon className="w-3 h-3 shrink-0" />
+                {displayStatus}
+              </span>
+              {order.isManualOverride && (
+                <span className="flex items-center gap-0.5 text-[10px] font-black uppercase text-white bg-amber-500 px-2 py-0.5 rounded shadow-sm leading-none">
+                  <AlertTriangle className="w-2.5 h-2.5 shrink-0" /> MANUAL
+                </span>
+              )}
+            </div>
             <button
               onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
               title="Copiar"
@@ -883,16 +1148,36 @@ export default function App() {
             <div><span className="font-medium">Truck:</span> <span className="text-gray-800 font-bold">{order.truckId || "Unassigned"}</span></div>
           </div>
 
-          {/* Backorders */}
-          {backorders.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {backorders.map((bo, idx) => (
-                <span key={idx} className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">
-                  BO L{bo.lineNo}: -{bo.missingQty > 0 ? bo.missingQty + 'pcs' : bo.missingBoxes + 'bxs'}
-                </span>
-              ))}
-            </div>
-          )}
+          {/* Lines Pending badge + BO detail tags */}
+          {!isReadOnly && order.masterItems && order.masterItems.length > 0 && (() => {
+            const pendingCount = order.masterItems.filter(m => {
+              const mQty = Number(m.orderedQty) || 0;
+              return mQty > 0 && getPackedQtyForLine(m.lineNo, order) < mQty;
+            }).length;
+            const backorders = getBackorders(order);
+            return (
+              <div className="mt-1.5 flex flex-col gap-1">
+                {pendingCount > 0 ? (
+                  <span className="text-[10px] bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded w-max flex items-center gap-1">
+                    ⏳ {pendingCount} Line{pendingCount !== 1 ? 's' : ''} Pending
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-2 py-0.5 rounded w-max flex items-center gap-1">
+                    ✅ All Lines Complete
+                  </span>
+                )}
+                {backorders.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {backorders.map((bo, idx) => (
+                      <span key={idx} className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded">
+                        BO L{bo.lineNo}: -{bo.missingQty > 0 ? bo.missingQty.toLocaleString() + 'pcs' : bo.missingBoxes.toLocaleString() + 'bxs'}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Notes */}
           {order.notes && (
@@ -902,23 +1187,32 @@ export default function App() {
           {/* Edit/Delete */}
           {!isReadOnly && (
             <div className="flex gap-1 justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-              <button onClick={() => openQuickEdit(order)} className="p-1 text-gray-400 hover:text-orange-500 hover:bg-white/60 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-3.5 h-3.5" /></button>
-              <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1 text-gray-400 hover:text-red-600 hover:bg-white/60 rounded-lg transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5" /></button>
+              <button onClick={() => openQuickEdit(order)} className="p-1 text-gray-500 hover:text-orange-500 hover:bg-white/60 rounded-lg transition-all" title="Quick Edit"><Pencil className="w-5 h-5" /></button>
+              <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Order", message:"Are you sure you want to delete this order?", onConfirm:() => executeDeleteOrder({ orderId: order.id })})} className="p-1 text-gray-500 hover:text-red-600 hover:bg-white/60 rounded-lg transition-all" title="Delete"><Trash2 className="w-5 h-5" /></button>
             </div>
           )}
         </div>
 
         {/* Right: vertical stats panel */}
-        <div className={`flex flex-col divide-y border-l w-[62px] shrink-0 ${statPanelBg}`}>
+        <div className={`flex flex-col divide-y border-l w-[68px] shrink-0 ${statPanelBg}`}>
+          {/* Normal Pallets */}
           <div className="flex-1 flex flex-col items-center justify-center py-2 px-1 text-center">
             <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Plts</p>
-            <p className="text-[15px] font-black text-gray-900 leading-none">{totalP}</p>
-            {order.loomPallets ? <span className="text-[8px] text-gray-400 font-medium leading-tight">({order.loomPallets}Lm)</span> : null}
+            <p className="text-[15px] font-black text-gray-900 leading-none">{normalP}</p>
           </div>
+          {/* Loom Pallets — only shown when > 0, completely separate */}
+          {loomP > 0 && (
+            <div className={`flex flex-col items-center justify-center py-1.5 px-1 text-center ${statPanelBg}`}>
+              <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Looms</p>
+              <p className="text-[15px] font-black text-gray-900 leading-none">{loomP}</p>
+            </div>
+          )}
+          {/* Boxes */}
           <div className="flex-1 flex flex-col items-center justify-center py-2 px-1 text-center">
             <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Boxes</p>
             <p className="text-[15px] font-black text-gray-900 leading-none">{Number(order.boxes||0).toLocaleString()}</p>
           </div>
+          {/* Weight */}
           <div className="flex-1 flex flex-col items-center justify-center py-2 px-1 text-center">
             <p className={`text-[8px] font-black uppercase tracking-wide mb-0.5 ${statLabel}`}>Lbs</p>
             <p className="text-[13px] font-black text-gray-900 leading-none">{Number(order.weight||0).toLocaleString()}</p>
@@ -948,9 +1242,7 @@ export default function App() {
         <div className="w-full max-w-sm">
           {/* Brand mark */}
           <div className="flex justify-center mb-8">
-            <div className="flex items-center gap-3">
-              <PacManScene className="h-10 w-auto"/>
-            </div>
+            <RabbitLogo className="h-20 w-auto" />
           </div>
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
             <h1 className="text-xl font-black text-gray-900 mb-1">Welcome back</h1>
@@ -986,6 +1278,11 @@ export default function App() {
            <button onClick={() => setPrintMode('none')} className="bg-gray-800 text-white px-4 py-2 rounded shadow-lg font-bold">Close Preview</button>
         </div>
 
+        {/* Zero margins for label print modes */}
+        {(printMode === 'labels_all' || printMode === 'label_single') && (
+          <style>{`@media print { @page { margin: 0; } body { margin: 0; } }`}</style>
+        )}
+
         {/* LABELS */}
         {(printMode === 'labels_all' && editingOrder?.palletList) && editingOrder.palletList.map(p => (
           <div key={p.id} className="label-page flex flex-col justify-center items-center text-center border-b border-gray-300 print:border-none" style={{ width: '4in', height: '2in', padding: '0.2in', boxSizing: 'border-box', fontFamily: 'sans-serif' }}>
@@ -1017,7 +1314,7 @@ export default function App() {
             <h3 className="text-xs font-bold mb-2 uppercase tracking-wide text-gray-600">Items on Pallet</h3>
             <table className="w-full text-left border-collapse text-xs">
               <thead><tr className="bg-gray-100"><th className="px-2 py-1.5 border-b-2 border-gray-300">LINE</th><th className="px-2 py-1.5 border-b-2 border-gray-300">ITEM #</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">BOXES / PLT</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">QTY/BOX</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-right">TOTAL PCS</th></tr></thead>
-              <tbody>{(pallet.items || []).map(i => {
+              <tbody>{[...(pallet.items || [])].sort((a,b) => parseInt(a.lineNo||'0') - parseInt(b.lineNo||'0')).map(i => {
                 const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
                 const bxs = isLoom ? 1 : i.boxes;
                 return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{Number(bxs||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
@@ -1033,7 +1330,7 @@ export default function App() {
             <h3 className="text-xs font-bold mb-2 uppercase tracking-wide text-gray-600">Items on Pallet</h3>
             <table className="w-full text-left border-collapse text-xs">
               <thead><tr className="bg-gray-100"><th className="px-2 py-1.5 border-b-2 border-gray-300">LINE</th><th className="px-2 py-1.5 border-b-2 border-gray-300">ITEM #</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">BOXES / PLT</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">QTY/BOX</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-right">TOTAL PCS</th></tr></thead>
-              <tbody>{(printTargetPallet.items || []).map(i => {
+              <tbody>{[...(printTargetPallet.items || [])].sort((a,b) => parseInt(a.lineNo||'0') - parseInt(b.lineNo||'0')).map(i => {
                 const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
                 const bxs = isLoom ? 1 : i.boxes;
                 return (<tr key={i.id}><td className="px-2 py-1.5 border-b border-gray-200">{i.lineNo}</td><td className="px-2 py-1.5 border-b border-gray-200">{i.itemNumber}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{Number(bxs||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-center">{(Number(i.qtyPerBox)||0).toLocaleString()}</td><td className="px-2 py-1.5 border-b border-gray-200 text-right">{(bxs * (Number(i.qtyPerBox)||0)).toLocaleString()}</td></tr>)
@@ -1045,21 +1342,22 @@ export default function App() {
 
         {/* PACKING LIST GROUPED BY LINE */}
         {printMode === 'packing_list' && (
-          <div className="p-10 font-sans mx-auto max-w-[8.5in]">
-            <h1 className="text-center text-lg font-bold mb-6 text-[#2c3e50]">Distribution List</h1>
-            <div className="mb-8 text-sm">
+          <div className="p-6 font-sans mx-auto max-w-[8.5in]">
+            <style>{'@media print { @page { margin: 0.4in; size: letter portrait; } body { margin: 0; } }'}</style>
+            <h1 className="text-center text-sm font-bold mb-2 text-[#2c3e50]">Distribution List</h1>
+            <div className="mb-3 text-xs">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po} | <b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
               <p><b>Total Boxes for Order:</b> {totals.boxes.toLocaleString()}</p>
             </div>
-            <table className="w-full text-left border-collapse text-sm">
+            <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-gray-100 uppercase text-xs text-gray-600">
-                  <th className="p-3 border-b border-gray-300">Line</th>
-                  <th className="p-3 border-b border-gray-300">Pallet ID</th>
-                  <th className="p-3 border-b border-gray-300">Item #</th>
-                  <th className="p-3 border-b border-gray-300 text-center">Boxes / Plts</th>
-                  <th className="p-3 border-b border-gray-300 text-center">Qty/Box</th>
-                  <th className="p-3 border-b border-gray-300 text-right">Total Pcs</th>
+                <tr className="bg-gray-100 uppercase text-[10px] text-gray-600">
+                  <th className="px-2 py-1 border-b border-gray-300">Line</th>
+                  <th className="px-2 py-1 border-b border-gray-300">Pallet ID</th>
+                  <th className="px-2 py-1 border-b border-gray-300">Item #</th>
+                  <th className="px-2 py-1 border-b border-gray-300 text-center">Boxes / Plts</th>
+                  <th className="px-2 py-1 border-b border-gray-300 text-center">Qty/Box</th>
+                  <th className="px-2 py-1 border-b border-gray-300 text-right">Total Pcs</th>
                 </tr>
               </thead>
               <tbody>
@@ -1088,20 +1386,20 @@ export default function App() {
 
                           return (
                           <tr key={`${line}-${it.id}-${idx}`} className="border-b border-gray-100">
-                            <td className="p-3">{it.lineNo}</td>
-                            <td className="p-3">Pallet {it.palletId}</td>
-                            <td className="p-3">{it.itemNumber}</td>
-                            <td className="p-3 text-center">{bxs.toLocaleString()}</td>
-                            <td className="p-3 text-center">{(Number(it.qtyPerBox)||0).toLocaleString()}</td>
-                            <td className="p-3 text-right">{pcs.toLocaleString()}</td>
+                            <td className="px-2 py-1">{it.lineNo}</td>
+                            <td className="px-2 py-1">Pallet {it.palletId}</td>
+                            <td className="px-2 py-1">{it.itemNumber}</td>
+                            <td className="px-2 py-1 text-center">{bxs.toLocaleString()}</td>
+                            <td className="px-2 py-1 text-center">{(Number(it.qtyPerBox)||0).toLocaleString()}</td>
+                            <td className="px-2 py-1 text-right">{pcs.toLocaleString()}</td>
                           </tr>
                           )
                         })}
                         <tr className="bg-gray-50 border-b-2 border-gray-300 font-bold text-gray-800">
-                          <td colSpan={3} className="p-3 text-right">Subtotal Line {line}:</td>
-                          <td className="p-3 text-center">{subBoxes.toLocaleString()}</td>
-                          <td className="p-3 text-center">-</td>
-                          <td className="p-3 text-right">{subPcs.toLocaleString()}</td>
+                          <td colSpan={3} className="px-2 py-1 text-right">Subtotal Line {line}:</td>
+                          <td className="px-2 py-1 text-center">{subBoxes.toLocaleString()}</td>
+                          <td className="px-2 py-1 text-center">-</td>
+                          <td className="px-2 py-1 text-right">{subPcs.toLocaleString()}</td>
                         </tr>
                       </React.Fragment>
                     );
@@ -1114,33 +1412,40 @@ export default function App() {
 
         {/* WEIGHT SHEET */}
         {printMode === 'weight_sheet' && (
-          <div className="p-10 font-sans mx-auto max-w-[8.5in]">
-            <h1 className="text-center text-lg font-bold mb-6">Weight Sheet</h1>
-            <div className="mb-8 text-sm">
+          <div className="p-6 font-sans mx-auto max-w-[8.5in]">
+            <style>{'@media print { @page { margin: 0.4in; size: letter portrait; } body { margin: 0; } }'}</style>
+            <h1 className="text-center text-base font-bold mb-2">Weight Sheet</h1>
+            <div className="mb-3 text-xs">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po}</p>
-              <p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
-              <p><b>Total Boxes for Order:</b> {totals.boxes.toLocaleString()}</p>
+              <p><b>Ship Date:</b> {editingOrder?.shipmentDate} &nbsp;|&nbsp; <b>Total Boxes:</b> {totals.boxes.toLocaleString()}</p>
             </div>
-            <table className="w-full text-left border-collapse text-sm">
+            <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-gray-100 uppercase text-xs text-gray-600">
-                  <th className="p-4 border-b border-gray-300">Pallet ID</th>
-                  <th className="p-4 border-b border-gray-300 text-center">Total Boxes on Pallet</th>
-                  <th className="p-4 border-b border-gray-300 text-right">Weight (lbs)</th>
+                <tr className="bg-gray-100 uppercase text-[10px] text-gray-600">
+                  <th className="px-3 py-1.5 border-b border-gray-300">Pallet ID</th>
+                  <th className="px-3 py-1.5 border-b border-gray-300 text-center">Total Boxes on Pallet</th>
+                  <th className="px-3 py-1.5 border-b border-gray-300 text-right">Weight (lbs)</th>
                 </tr>
               </thead>
               <tbody>
                 {editingOrder?.palletList?.map(p => {
                   const displayWeight = p.weight && p.weight !== "0.00" && p.weight !== "0" ? p.weight : "";
                   return (
-                    <tr key={p.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
-                      <td className="p-3 py-4 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
-                      <td className="p-3 py-4 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
-                      <td className="p-3 py-4 text-right"><div className="inline-block min-w-[100px] h-8 border-b border-gray-400">{displayWeight}</div></td>
+                    <tr key={p.id} className="border-b border-gray-200">
+                      <td className="px-3 py-1.5 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
+                      <td className="px-3 py-1.5 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right"><div className="inline-block min-w-[90px] h-5 border-b border-gray-400">{displayWeight}</div></td>
                     </tr>
                   )
                 })}
               </tbody>
+              <tfoot>
+                <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
+                  <td className="px-3 py-2 text-gray-800">TOTAL</td>
+                  <td className="px-3 py-2 text-center text-gray-800">{Number(totals.boxes||0).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-right text-gray-900">{Number(totals.weight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lbs</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
@@ -1207,6 +1512,71 @@ export default function App() {
             </div>
           </div>
         )}
+        {/* CONSOLIDATION FORM */}
+        {printMode === 'consolidation_form' && (
+          <div style={{ fontFamily: 'Arial, sans-serif', padding: '0.45in', maxWidth: '8.5in', margin: '0 auto' }}>
+            {/* Header */}
+            <div style={{ borderBottom: '2.5px solid #1e293b', paddingBottom: '10px', marginBottom: '18px' }}>
+              <h1 style={{ margin: 0, fontSize: '20px', fontWeight: '900', color: '#1e293b', textTransform: 'uppercase', letterSpacing: '2px' }}>
+                Warehouse Consolidation Form
+              </h1>
+              <div style={{ display: 'flex', gap: '40px', marginTop: '8px', fontSize: '11px', color: '#475569' }}>
+                <span>Date: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                <span>Operator Name: ________________________________________</span>
+              </div>
+            </div>
+            {/* Table */}
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', border: '2px solid #334155', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '9%' }} />   {/* DATE */}
+                <col style={{ width: '27%' }} />  {/* LOT # */}
+                <col style={{ width: '9%' }} />   {/* QTY/BOX */}
+                <col style={{ width: '8%' }} />   {/* BOXES */}
+                <col style={{ width: '9%' }} />   {/* TOTAL PCS */}
+                <col style={{ width: '19%' }} />  {/* ORIGINAL BIN */}
+                <col style={{ width: '19%' }} />  {/* MOVED TO */}
+              </colgroup>
+              <thead>
+                <tr>
+                  {['DATE', 'LOT #', 'QTY / BOX', 'BOXES', 'TOTAL PCS', 'ORIGINAL BIN', 'MOVED TO'].map(h => (
+                    <th key={h} style={{ border: '1px solid #64748b', padding: '9px 8px', textAlign: 'left', fontWeight: '800', fontSize: '10px', letterSpacing: '0.5px', backgroundColor: '#f1f5f9', color: '#1e293b', overflow: 'hidden' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 15 }).map((_, i) => (
+                  <tr key={i} style={{ height: '3.2rem', backgroundColor: i % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                    {Array.from({ length: 7 }).map((__, j) => (
+                      <td key={j} style={{ border: '1px solid #94a3b8', padding: '4px 8px', overflow: 'hidden' }}>&nbsp;</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ marginTop: '18px', fontSize: '9px', color: '#94a3b8', textAlign: 'right' }}>
+              Operations & Logistics Dashboard
+            </div>
+          </div>
+        )}
+
+        {/* QUICK LABEL 4x2 */}
+        {printMode === 'label_4x2' && (
+          <div style={{ width: '4in', height: '2in', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.15in', boxSizing: 'border-box', overflow: 'hidden', fontFamily: 'Arial, sans-serif' }}>
+            <p style={{ margin: 0, fontWeight: '900', lineHeight: 1, textAlign: 'center', wordBreak: 'break-word', fontSize: '15vw' }}>
+              {labelContent || '—'}
+            </p>
+          </div>
+        )}
+
+        {/* QUICK LABEL 4x4 */}
+        {printMode === 'label_4x4' && (
+          <div style={{ width: '4in', height: '4in', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0.2in', boxSizing: 'border-box', overflow: 'hidden', fontFamily: 'Arial, sans-serif' }}>
+            <p style={{ margin: 0, fontWeight: '900', lineHeight: 1, textAlign: 'center', wordBreak: 'break-word', fontSize: '20vw' }}>
+              {labelContent || '—'}
+            </p>
+          </div>
+        )}
+
         <style>{`@media print { .print\\:hidden { display: none !important; } @page { margin: 0.5in; } .label-page { page-break-after: always; width: 4in; height: 2in; margin: 0; padding: 0.2in; } .sheet-page { page-break-after: always; margin: 0; padding: 0.5in; width: 100%; } }`}</style>
       </div>
     );
@@ -1220,14 +1590,15 @@ export default function App() {
       <header className="bg-white sticky top-0 z-30 px-4 sm:px-8 flex items-center h-14 sm:h-16 shadow-sm border-b border-gray-100 relative">
         {/* Logo */}
         <h1 className="text-lg sm:text-xl font-black tracking-tight select-none flex items-center gap-2">
-          <PacManScene className="h-6 w-auto shrink-0"/>
+          <RabbitLogo className="h-9 w-auto shrink-0" />
         </h1>
         {/* Nav */}
         <nav className="hidden sm:flex absolute left-1/2 -translate-x-1/2 h-full items-center gap-1">
           {[
             { id: "Order Summary", icon: <List className="w-4 h-4"/>, label: "Order Summary" },
             { id: "Create Order", icon: <Plus className="w-4 h-4"/>, label: "Create Order" },
-            { id: "Truck Report", icon: <TruckIcon className="w-4 h-4"/>, label: "Truck Report" }
+            { id: "Truck Report", icon: <TruckIcon className="w-4 h-4"/>, label: "Truck Report" },
+            { id: "Formats", icon: <FileText className="w-4 h-4"/>, label: "Formats" }
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 h-full text-sm font-semibold flex items-center gap-2 transition-all border-b-2 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "border-orange-500 text-orange-600 bg-orange-50/50" : "border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-50"}`}>
               {tab.icon} {tab.label}
@@ -1248,7 +1619,8 @@ export default function App() {
             {[
               { id: "Order Summary", icon: <List className="w-5 h-5"/>, label: "Order Summary" },
               { id: "Create Order", icon: <Plus className="w-5 h-5"/>, label: "Create Order" },
-              { id: "Truck Report", icon: <TruckIcon className="w-5 h-5"/>, label: "Truck Report" }
+              { id: "Truck Report", icon: <TruckIcon className="w-5 h-5"/>, label: "Truck Report" },
+              { id: "Formats", icon: <FileText className="w-5 h-5"/>, label: "Formats" }
             ].map(tab => (
               <button key={tab.id} onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-6 py-4 text-sm font-semibold border-b border-gray-100 ${activeTab === tab.id || (activeTab === "Order Details" && tab.id === "Order Summary") ? "text-orange-600 bg-orange-50" : "text-gray-700 hover:bg-gray-50"}`}>
@@ -1272,6 +1644,68 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* ── WAREHOUSE PENDING TASKS ─────────────────────────────── */}
+            <section className="mb-8">
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                {/* Header — always visible */}
+                <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                  <button
+                    onClick={() => setIsTasksExpanded(v => !v)}
+                    className="flex items-center gap-2 flex-1 text-left"
+                  >
+                    <Package className="w-4 h-4 text-orange-500 flex-shrink-0"/>
+                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Warehouse Pending Tasks</h2>
+                    {todos.filter(t => !t.is_completed).length > 0 && (
+                      <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">
+                        {todos.filter(t => !t.is_completed).length}
+                      </span>
+                    )}
+                    <ChevronDown className={`w-4 h-4 text-gray-400 ml-1 transition-transform flex-shrink-0 ${isTasksExpanded ? 'rotate-180' : ''}`}/>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const completed = todos.filter(t => t.is_completed);
+                      if (completed.length === 0) return;
+                      await supabase!.from('warehouse_todos').delete().in('id', completed.map(t => t.id));
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-red-500 border border-red-200 bg-red-50 rounded-md hover:bg-red-100 transition-colors ml-3"
+                  >
+                    <Trash2 className="w-3 h-3"/> Clear Completed
+                  </button>
+                </div>
+                {/* Task list — collapsible */}
+                {isTasksExpanded && (
+                  <div className="divide-y divide-gray-100">
+                    {todos.length === 0 && (
+                      <p className="text-center text-gray-400 text-sm py-6 font-medium">No pending tasks</p>
+                    )}
+                    {todos.map(todo => (
+                      <div key={todo.id} className={`flex items-start gap-3 px-5 py-3 transition-colors ${todo.is_completed ? 'bg-gray-50 opacity-50' : 'hover:bg-orange-50/20'}`}>
+                        <input type="checkbox" checked={todo.is_completed}
+                          onChange={async () => { await supabase!.from('warehouse_todos').update({ is_completed: !todo.is_completed }).eq('id', todo.id); }}
+                          className="mt-0.5 w-4 h-4 rounded accent-orange-500 cursor-pointer flex-shrink-0"/>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`font-black text-sm ${todo.is_completed ? 'line-through text-gray-400' : 'text-slate-800'}`}>{todo.lot_number}</span>
+                            <span className="text-[11px] bg-orange-100 text-orange-700 font-bold px-1.5 py-0.5 rounded">{Number(todo.total_pcs).toLocaleString()} pcs</span>
+                            <span className="text-[11px] text-gray-500 font-medium">{todo.boxes} bxs × {todo.qty_per_box}/bx</span>
+                          </div>
+                          <div className="flex flex-wrap gap-3 mt-0.5 text-[11px] text-gray-500">
+                            <span>📍 <b>From:</b> {todo.original_bin}</span>
+                            {todo.moved_to && <span>➡️ <b>To:</b> {todo.moved_to}</span>}
+                            {todo.action_required && <span>⚡ {todo.action_required}</span>}
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-gray-400 flex-shrink-0 mt-0.5">
+                          {new Date(todo.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
 
             {delayedOrdersList.length > 0 && (
               <section className="mb-10">
@@ -1317,7 +1751,8 @@ export default function App() {
                                 <ChevronDown className={`w-4 h-4 transition-transform ${expandedTrucks[`${dg.date}-${t.id}`] ? 'rotate-180' : ''}`} />
                               </button>
                               <div className="flex gap-5 items-baseline">
-                                <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{t.summary.pallets}</span> Plts</span>
+                                {t.summary.loomPallets > 0 && <span className="text-[12px] text-gray-500 font-medium"><span className="text-purple-700 font-black text-[14px]">{t.summary.loomPallets}</span> Lms</span>}
+                                <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{t.summary.normalPallets}</span> Plts</span>
                                 <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{Number(t.summary.boxes).toLocaleString()}</span> Bxs</span>
                                 <span className="text-orange-600 font-black text-[15px]">{Number(parseFloat(t.summary.weight)).toLocaleString()} <span className="text-[11px] font-bold">LBS</span></span>
                               </div>
@@ -1367,7 +1802,8 @@ export default function App() {
                                   <ChevronDown className={`w-4 h-4 transition-transform ${expandedTrucks[`${dg.date}-${t.id}`] ? 'rotate-180' : ''}`} />
                                 </button>
                                 <div className="flex gap-5 items-baseline">
-                                  <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{t.summary.pallets}</span> Plts</span>
+                                  {t.summary.loomPallets > 0 && <span className="text-[12px] text-gray-500 font-medium"><span className="text-purple-700 font-black text-[14px]">{t.summary.loomPallets}</span> Lms</span>}
+                                  <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{t.summary.normalPallets}</span> Plts</span>
                                   <span className="text-[12px] text-gray-500 font-medium"><span className="text-gray-800 font-black text-[14px]">{Number(t.summary.boxes).toLocaleString()}</span> Bxs</span>
                                   <span className="text-emerald-600 font-black text-[15px]">{Number(parseFloat(t.summary.weight)).toLocaleString()} <span className="text-[11px] font-bold">LBS</span></span>
                                 </div>
@@ -1386,6 +1822,7 @@ export default function App() {
                 </div>
               </section>
             )}
+
           </div>
         )}
 
@@ -1520,11 +1957,88 @@ export default function App() {
            </div>
         )}
 
+        {/* VIEW: FORMATS */}
+        {activeTab === "Formats" && (
+          <div className="animate-in fade-in duration-500">
+            <h2 className="text-3xl font-black text-slate-900 mb-8 tracking-tight">Formats</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+              {/* Warehouse Consolidation */}
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                <div className="p-6">
+                  <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center mb-4">
+                    <Package className="w-6 h-6"/>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-black text-slate-900">Warehouse Consolidation</h3>
+                    <button
+                      onClick={() => setPrintMode('consolidation_form')}
+                      className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-bold rounded-lg hover:bg-orange-700 transition-colors shadow-sm"
+                    >
+                      <Printer className="w-4 h-4"/> Print Sheet
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Label Maker */}
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+                <div className="p-6">
+                  <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center mb-4">
+                    <Tag className="w-6 h-6"/>
+                  </div>
+                  <h3 className="text-lg font-black text-slate-900 mb-4">Quick Label Maker</h3>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Label Text</label>
+                      <textarea
+                        value={labelContent}
+                        onChange={e => setLabelContent(e.target.value)}
+                        rows={2}
+                        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 resize-none"
+                        placeholder="e.g. SKU-999 or 1"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Label Size</label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setLabelSize('4x2')}
+                          className={`flex-1 py-2 text-sm font-bold rounded-md border transition-colors ${labelSize === '4x2' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                        >
+                          4 × 2 in
+                        </button>
+                        <button
+                          onClick={() => setLabelSize('4x4')}
+                          className={`flex-1 py-2 text-sm font-bold rounded-md border transition-colors ${labelSize === '4x4' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+                        >
+                          4 × 4 in
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-t border-gray-100 pt-4 mt-4">
+                    <button
+                      onClick={() => setPrintMode(labelSize === '4x2' ? 'label_4x2' : 'label_4x4')}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white text-sm font-bold rounded-lg hover:bg-orange-700 transition-colors shadow-sm"
+                    >
+                      <Printer className="w-4 h-4"/> Print Label
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
         {/* VIEW: ORDER DETAILS */}
         {activeTab === "Order Details" && editingOrder && (
           <div className="animate-in fade-in duration-300">
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-              <button onClick={() => { setEditingOrder(null); setPendingRemoteUpdate(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setEditingOrder(null); setPendingRemoteUpdate(null); setActiveTab("Order Summary"); }} className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm w-fit"><ArrowLeft className="w-4 h-4"/> Back</button>
+              </div>
               <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap sm:justify-end">
                 <button onClick={() => setDetailsTab('general')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='general' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><Info className="w-4 h-4 shrink-0"/> <span className="hidden xs:inline">Order </span>Details</button>
                 <button onClick={() => setDetailsTab('packing_list')} className={`px-3 py-1.5 rounded text-xs sm:text-sm font-bold border flex items-center gap-1.5 whitespace-nowrap ${detailsTab==='packing_list' ? 'bg-slate-100 text-gray-800 border-gray-300' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}><FileText className="w-4 h-4 shrink-0"/> Distribution</button>
@@ -1535,32 +2049,7 @@ export default function App() {
             </div>
 
             {/* Botón de fusión manual — solo aparece cuando otro usuario editó esta misma orden */}
-            {pendingRemoteUpdate && (
-              <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex items-start gap-2 flex-1">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5"/>
-                  <div>
-                    <p className="text-amber-800 text-sm font-bold">Tu compañero guardó cambios en esta orden.</p>
-                    <p className="text-amber-600 text-xs mt-0.5">Si eres tú mismo desde otro dispositivo, haz clic en <b>Ignorar</b>. Si es un compañero, usa <b>Incorporar</b> para unir sus cambios con los tuyos.</p>
-                  </div>
-                </div>
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    onClick={() => {
-                      if (!editingOrder || !pendingRemoteUpdate) return;
-                      setEditingOrder(mergeOrders(pendingRemoteUpdate, editingOrder));
-                      setPendingRemoteUpdate(null);
-                    }}
-                    className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded hover:bg-amber-700 whitespace-nowrap"
-                  >
-                    Incorporar
-                  </button>
-                  <button onClick={() => setPendingRemoteUpdate(null)} className="px-3 py-1.5 border border-amber-400 text-amber-700 text-xs font-bold rounded hover:bg-amber-100 whitespace-nowrap">
-                    Ignorar (soy yo)
-                  </button>
-                </div>
-              </div>
-            )}
+
 
             {detailsTab === 'general' && (
               <>
@@ -1570,6 +2059,13 @@ export default function App() {
                     <span className="text-sm font-medium text-green-600 bg-green-50 px-3 py-1 rounded border border-green-100 flex items-center gap-2"><CheckCircle2 className="w-4 h-4"/> Auto-Save Active (Supabase)</span>
                   </div>
                   <div className="p-6">
+                    {editingOrder.isManualOverride && (
+                      <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-700 rounded-lg px-3 py-2 mb-4 text-sm font-bold">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        Manual Override — Estimated Values
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-5">
                       <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">Order Number</label>
@@ -1835,17 +2331,30 @@ export default function App() {
                       <tr><th className="p-4 border-b border-gray-300">Pallet ID</th><th className="p-4 border-b border-gray-300 text-center">Total Boxes in Pallet</th><th className="p-4 border-b border-gray-300 text-right">Weight (lbs)</th></tr>
                     </thead>
                     <tbody>
-                      {editingOrder.palletList?.map(p => {
+                      {editingOrder.palletList?.map((p, idx) => {
                         const displayWeight = p.weight && p.weight !== "0.00" && p.weight !== "0" ? p.weight : "";
                         return (
                           <tr key={p.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
                             <td className="p-3 py-4 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
                             <td className="p-3 py-4 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
                             <td className="p-3 py-4 text-right">
-                               <input 
-                                 value={displayWeight} 
-                                 onChange={e => setEditingOrder({...editingOrder, palletList: editingOrder.palletList?.map(px => px.id === p.id ? {...px, weight: e.target.value} : px)})} 
-                                 className="w-24 border border-gray-300 rounded p-1.5 text-right bg-gray-50 outline-none focus:bg-white focus:border-orange-400 shadow-sm" 
+                               <input
+                                 data-weight-idx={idx}
+                                 value={displayWeight}
+                                 onChange={e => setEditingOrder({...editingOrder, palletList: editingOrder.palletList?.map(px => px.id === p.id ? {...px, weight: e.target.value} : px)})}
+                                 onKeyDown={e => {
+                                   if (e.key === 'Enter') {
+                                     e.preventDefault();
+                                     const next = document.querySelector<HTMLInputElement>(`[data-weight-idx="${idx + 1}"]`);
+                                     if (next) next.focus();
+                                   }
+                                 }}
+                                 onBlur={async e => {
+                                   if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+                                     await supabase.from('pallets').update({ weight: e.target.value || '0.00' }).eq('id', p.id);
+                                   }
+                                 }}
+                                 className="w-24 border border-gray-300 rounded p-1.5 text-right bg-gray-50 outline-none focus:bg-white focus:border-orange-400 shadow-sm"
                                  placeholder="Enter Weight"
                                />
                             </td>
@@ -1853,6 +2362,15 @@ export default function App() {
                         )
                       })}
                     </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-100 font-bold border-t-2 border-gray-300">
+                        <td className="p-3 py-4 text-gray-800">TOTAL</td>
+                        <td className="p-3 py-4 text-center text-gray-800">{Number(totals.boxes||0).toLocaleString()}</td>
+                        <td className="p-3 py-4 text-right text-orange-600 text-base pr-5">
+                          {Number(totals.weight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lbs
+                        </td>
+                      </tr>
+                    </tfoot>
                   </table>
                </div>
             )}
@@ -1870,16 +2388,38 @@ export default function App() {
                           <span className="text-sm text-gray-500 font-medium">Agregando:</span>
                           <span className="bg-orange-500 text-white text-sm font-bold px-3 py-0.5 rounded-full">Línea {nextLineNo}</span>
                         </div>
-                        <div className="flex gap-4 bg-gray-50 p-4 rounded border border-gray-200">
-                          <input
-                            value={newItemNumberForm}
-                            onChange={e => setNewItemNumberForm(e.target.value)}
-                            onKeyDown={e => { if(e.key === 'Enter') handleAddMasterItem() }}
-                            placeholder="Press Enter or Add to List"
-                            className="flex-1 border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
-                            autoFocus
-                          />
-                          <button onClick={handleAddMasterItem} className="bg-white border border-gray-300 px-4 py-2 rounded text-sm font-bold flex items-center gap-2 hover:bg-gray-50"><Plus className="w-4 h-4"/> Add to List</button>
+                        <div className="flex flex-col gap-3 bg-gray-50 p-4 rounded border border-gray-200">
+                          <div className="flex gap-3">
+                            <div className="flex-1">
+                              <label className="block text-[11px] font-bold text-gray-500 mb-1 uppercase tracking-wide">Item Number</label>
+                              <input
+                                id="item-number-input"
+                                value={newItemNumberForm}
+                                onChange={e => setNewItemNumberForm(e.target.value)}
+                                onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); (document.getElementById('item-target-qty') as HTMLInputElement)?.focus(); } }}
+                                placeholder="e.g. SKU-12345"
+                                className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
+                                autoFocus
+                              />
+                            </div>
+                            <div className="w-36">
+                              <label className="block text-[11px] font-bold text-gray-500 mb-1 uppercase tracking-wide">Target Qty (pcs)</label>
+                              <input
+                                id="item-target-qty"
+                                type="number"
+                                min="0"
+                                value={newItemTargetQtyForm || ""}
+                                onChange={e => setNewItemTargetQtyForm(Number(e.target.value))}
+                                onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); handleAddMasterItem(); } }}
+                                placeholder="0"
+                                className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button onClick={handleAddMasterItem} className="flex-1 bg-white border border-gray-300 px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-50"><Plus className="w-4 h-4"/> {editingMasterItemId ? 'Update Item' : 'Add to List'}</button>
+                            {editingMasterItemId && <button onClick={() => { setEditingMasterItemId(null); setNewItemNumberForm(""); setNewItemTargetQtyForm(0); }} className="px-3 py-2 rounded text-sm border border-gray-300 text-gray-500 hover:bg-gray-50">Cancel</button>}
+                          </div>
                         </div>
                       </div>
                     );
@@ -1887,14 +2427,27 @@ export default function App() {
                   <h3 className="text-sm font-bold text-gray-500 mb-2">Defined Lines:</h3>
                   <table className="w-full text-sm text-left border border-gray-200">
                     <thead className="bg-gray-100 text-gray-600">
-                      <tr><th className="p-3 border-b border-gray-300 w-20">LINE</th><th className="p-3 border-b border-gray-300">ITEM NUMBER</th><th className="p-3 border-b border-gray-300 w-10"></th></tr>
+                      <tr>
+                        <th className="p-3 border-b border-gray-300 w-20">LINE</th>
+                        <th className="p-3 border-b border-gray-300">ITEM NUMBER</th>
+                        <th className="p-3 border-b border-gray-300 w-32 text-center">TARGET QTY (pcs)</th>
+                        <th className="p-3 border-b border-gray-300 w-10"></th>
+                      </tr>
                     </thead>
                     <tbody>
                       {editingOrder.masterItems?.map(m => (
                         <tr key={m.id} className="border-b border-gray-200 bg-white">
                           <td className="p-3 font-bold text-gray-700">{m.lineNo}</td>
                           <td className="p-3">{m.itemNumber}</td>
-                          <td className="p-3 text-right"><button onClick={() => handleDeleteMasterItem(m.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4"/></button></td>
+                          <td className="p-3 text-center">
+                            <input type="number" min="0" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} className="w-24 border border-gray-300 rounded p-1.5 text-sm outline-none text-center focus:border-orange-400" placeholder="0"/>
+                          </td>
+                          <td className="p-3 text-right">
+                            <div className="flex gap-2 justify-end">
+                              <button onClick={() => { setEditingMasterItemId(m.id); setNewItemNumberForm(m.itemNumber); setNewItemTargetQtyForm(m.orderedQty || 0); setTimeout(()=>(document.getElementById('item-number-input') as HTMLInputElement)?.focus(),50); }} className="text-orange-400 hover:text-orange-600"><Pencil className="w-4 h-4"/></button>
+                              <button onClick={() => handleDeleteMasterItem(m.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4"/></button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                       {(!editingOrder.masterItems || editingOrder.masterItems.length === 0) && <tr><td colSpan={3} className="p-4 text-center text-gray-400">No items defined yet.</td></tr>}
@@ -1909,7 +2462,7 @@ export default function App() {
                   <div className="flex justify-between items-center mb-6">
                     <h2 className="text-xl font-bold text-orange-500">Order Review & Validation</h2>
                   </div>
-                  <p className="text-sm text-gray-500 mb-6 flex items-center gap-2 bg-orange-50 p-3 rounded text-violet-800 border border-orange-100"><Info className="w-4 h-4"/>Enter the required boxes and quantities from the order paper. The system compares in real time with what has been scanned.</p>
+                  <p className="text-sm text-gray-500 mb-6 flex items-center gap-2 bg-orange-50 p-3 rounded text-violet-800 border border-orange-100"><Info className="w-4 h-4"/>Target quantities come from the <b>Items</b> tab. This view compares what was packed vs. what was required in real time.</p>
                   
                   <table className="w-full text-sm text-left border border-gray-200">
                     <thead className="bg-gray-100 text-gray-600">
@@ -1930,15 +2483,16 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {editingOrder.masterItems?.map(m => {
+                      {editingOrder.masterItems?.map((m, mIndex) => {
                         const packedQty = getPackedQtyForLine(m.lineNo, editingOrder);
                         const packedBoxes = getPackedBoxesForLine(m.lineNo, editingOrder);
                         const mQty = Number(m.orderedQty) || 0;
                         const mBoxes = Number(m.orderedBoxes) || 0;
                         const diffQty = packedQty - mQty;
                         const diffBoxes = packedBoxes - mBoxes;
-                        const isMatch = (mQty > 0 || mBoxes > 0) && diffQty === 0 && diffBoxes === 0;
-                        const isMissing = (mQty > 0 || mBoxes > 0) && (diffQty < 0 || diffBoxes < 0);
+                        const boxesOk = mBoxes === 0 || diffBoxes === 0;
+                        const isMatch   = mQty > 0 && diffQty === 0 && boxesOk;
+                        const isMissing = mQty > 0 && (diffQty < 0 || (mBoxes > 0 && diffBoxes < 0));
                         const palletsWithLine = (editingOrder.palletList || []).filter(p => p.items.some(i => i.lineNo === m.lineNo));
                         const isExpanded = expandedCheckLines[m.id];
                         return (
@@ -1953,18 +2507,18 @@ export default function App() {
                               <td className="p-3 font-bold">{m.lineNo}</td>
                               <td className="p-3 font-mono">{m.itemNumber}</td>
                               <td className="p-3 text-center">
-                                <input type="number" value={m.orderedBoxes || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedBoxes', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-20 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-orange-400 shadow-sm" placeholder="0"/>
+                                <input type="number" min="0" id={`check-box-${mIndex}`} value={m.orderedBoxes || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedBoxes', Number(e.target.value))} onKeyDown={e => { if(e.key==='Enter'){e.preventDefault();(document.getElementById(`check-box-${mIndex+1}`) as HTMLInputElement)?.focus();}}} className="w-20 border border-gray-300 rounded p-1.5 text-sm outline-none text-center focus:border-orange-400" placeholder="0"/>
                               </td>
                               <td className="p-3 text-center">
-                                <input type="number" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} onKeyDown={handleOrderCheckKeyDown} className="order-check-input w-24 border border-gray-300 rounded p-1.5 outline-none text-center focus:border-orange-400 shadow-sm" placeholder="0"/>
+                                <span className="inline-block w-24 border border-gray-200 bg-gray-50 rounded p-1.5 text-sm text-center text-gray-700 font-medium">{m.orderedQty || '—'}</span>
                               </td>
                               <td className="p-3 text-center font-bold text-gray-800">{packedBoxes.toLocaleString()}</td>
                               <td className="p-3 text-center font-bold text-gray-800">{packedQty.toLocaleString()}</td>
                               <td className="p-3">
-                                {(mQty === 0 && mBoxes === 0) ? <span className="text-gray-400">Awaiting Input</span> :
+                                {mQty === 0 ? <span className="text-gray-400">—</span> :
                                  isMatch ? <span className="text-green-600 font-bold bg-green-50 border border-green-200 px-2 py-1 rounded flex items-center w-max gap-1"><CheckCircle2 className="w-4 h-4"/> Matched</span> :
-                                 isMissing ? <span className="text-red-600 font-bold bg-red-50 border border-red-200 px-2 py-1 rounded w-max block">Missing</span> :
-                                 <span className="text-yellow-600 font-bold bg-yellow-50 border border-yellow-200 px-2 py-1 rounded w-max block">Overpacked</span>}
+                                 isMissing ? <span className="text-yellow-600 font-bold bg-yellow-50 border border-yellow-200 px-2 py-1 rounded w-max block">Incomplete</span> :
+                                 <span className="text-red-600 font-bold bg-red-50 border border-red-200 px-2 py-1 rounded w-max block">Overpacked</span>}
                               </td>
                             </tr>
                             {isExpanded && (
@@ -2015,7 +2569,7 @@ export default function App() {
       {editingPalletId && editingOrder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/50" onClick={() => setEditingPalletId(null)} />
-          <div className="relative bg-slate-100 rounded-md shadow-2xl w-full max-w-[550px] flex flex-col max-h-[90vh]">
+          <div className="relative bg-slate-100 rounded-md shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]">
             <div className="p-4 flex justify-between items-center border-b border-gray-200 bg-white rounded-t-md">
               <h3 className="text-lg font-bold text-gray-800">
                 Edit Pallet {editingOrder.palletList?.find(p => p.id === editingPalletId)?.number}
@@ -2032,14 +2586,37 @@ export default function App() {
                       <div className="flex flex-col">
                         <span className="text-[13px] text-gray-700 font-bold">L{item.lineNo}: {item.itemNumber}</span>
                         <span className="text-[11px] text-gray-500">({item.boxes}b x {item.qtyPerBox}u = {item.boxes * item.qtyPerBox}p) - Added by <span className="font-bold text-orange-500">{item.addedBy || 'N/A'}</span></span>
+                        {(() => {
+                          const master = editingOrder.masterItems?.find(m => m.lineNo === item.lineNo);
+                          if (!master) return null;
+                          const target = Number(master.orderedQty) || 0;
+                          if (target === 0) return null;
+                          const packed = getPackedQtyForLine(item.lineNo, editingOrder);
+                          return (
+                            <span className={`text-[10px] font-bold mt-0.5 ${packed > target ? 'text-red-600' : packed === target ? 'text-green-600' : 'text-gray-600'}`}>
+                              Packed: {packed.toLocaleString()} / {target.toLocaleString()} pcs{packed > target ? ' (OVERPACKED!)' : ''}
+                            </span>
+                          );
+                        })()}
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
                         <button onClick={() => {setLineItemForm({...item}); setEditingLineItemId(item.id);}} className="text-orange-400 hover:text-orange-600"><Pencil className="w-4 h-4"/></button>
-                        <button onClick={() => setEditingOrder({...editingOrder, palletList: editingOrder.palletList?.map(p => p.id === editingPalletId ? {...p, items: p.items.filter(i => i.id !== item.id), boxes: p.items.filter(i => i.id !== item.id).reduce((s,i)=>s+(Number(i.boxes)||0),0)} : p)})} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
+                        {/* Move to another pallet */}
+                        <div className="relative">
+                          <button onClick={() => { setMovingLineItemId(movingLineItemId === item.id ? null : item.id); setTargetPalletNumber(1); }} className="text-blue-400 hover:text-blue-600" title="Move to pallet"><ArrowRightLeft className="w-4 h-4"/></button>
+                          {movingLineItemId === item.id && (
+                            <div className="absolute right-0 bottom-7 bg-white border shadow-xl rounded p-2 z-20 flex gap-1 w-36">
+                              <input type="number" min="1" max={editingOrder.palletList?.length} value={targetPalletNumber} onChange={e => setTargetPalletNumber(parseInt(e.target.value) || 1)} className="w-full border rounded p-1 text-xs" placeholder="Pallet #" />
+                              <button onClick={() => handleMoveLineItem(item.id, editingPalletId!, targetPalletNumber)} className="bg-blue-500 text-white px-2 rounded text-xs font-bold">OK</button>
+                            </div>
+                          )}
+                        </div>
+                        <button onClick={() => handleDeleteLineItem(editingPalletId, item.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
                       </div>
                     </div>
                   ))}
                   {editingOrder.palletList?.find(p => p.id === editingPalletId)?.items.length === 0 && <p className="text-[13px] text-gray-400 p-2">No items</p>}
+                  <div ref={itemsEndRef}/>
                 </div>
               </div>
 
@@ -2048,23 +2625,123 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Line No.</label>
-                    <input value={lineItemForm.lineNo} onChange={e => handleLineNoChange(e.target.value)} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
+                    <input id="pallet-field-line" value={lineItemForm.lineNo} onChange={e => handleLineNoChange(e.target.value)} onKeyDown={e => { if(e.key==='Enter'){e.preventDefault();document.getElementById('pallet-field-item')?.focus();}}} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
+                    {lineItemForm.lineNo && editingOrder?.masterItems?.find(m => m.lineNo === lineItemForm.lineNo) && (() => {
+                      const master = editingOrder.masterItems!.find(m => m.lineNo === lineItemForm.lineNo)!;
+                      const target = Number(master.orderedQty) || 0;
+                      const packed = getPackedQtyForLine(lineItemForm.lineNo, editingOrder);
+                      return target > 0 ? (
+                        <p className="text-[11px] mt-1 text-gray-500">🎯 Target: <b className="text-orange-600">{target.toLocaleString()} pcs</b> &nbsp;|&nbsp; 📦 Packed: <b className={packed >= target ? 'text-green-600' : 'text-gray-700'}>{packed.toLocaleString()} pcs</b></p>
+                      ) : null;
+                    })()}
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Item Number</label>
-                    <input value={lineItemForm.itemNumber} onChange={e => setLineItemForm({...lineItemForm, itemNumber: e.target.value})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" placeholder="SKU123" />
+                    <input id="pallet-field-item" value={lineItemForm.itemNumber} onChange={e => setLineItemForm({...lineItemForm, itemNumber: e.target.value})} onKeyDown={e => { if(e.key==='Enter'){e.preventDefault();document.getElementById('pallet-field-boxes')?.focus();}}} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" placeholder="SKU123" />
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">No. of Boxes</label>
-                    <input type="number" value={lineItemForm.boxes || ""} onChange={e => setLineItemForm({...lineItemForm, boxes: Number(e.target.value)})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
+                    <input id="pallet-field-boxes" type="number" value={lineItemForm.boxes || ""} onChange={e => setLineItemForm({...lineItemForm, boxes: Number(e.target.value)})} onKeyDown={e => { if(e.key==='Enter'){e.preventDefault();document.getElementById('pallet-field-qty')?.focus();}}} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
                   </div>
                   <div>
                     <label className="block text-[12px] font-medium text-gray-700 mb-1">Qty/Box</label>
-                    <input type="number" placeholder="Manual/Auto" value={lineItemForm.qtyPerBox || ""} onChange={e => setLineItemForm({...lineItemForm, qtyPerBox: Number(e.target.value)})} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
+                    <input id="pallet-field-qty" type="number" placeholder="Manual/Auto" value={lineItemForm.qtyPerBox || ""} onChange={e => setLineItemForm({...lineItemForm, qtyPerBox: Number(e.target.value)})} onKeyDown={e => { if(e.key==='Enter'){e.preventDefault();handleSaveLineItem();setTimeout(()=>document.getElementById('pallet-field-line')?.focus(),50);}}} className="w-full bg-white border border-gray-300 rounded p-1.5 text-[13px] outline-none focus:border-orange-400" />
                   </div>
                 </div>
                 <button onClick={() => handleSaveLineItem()} className="w-full py-2 bg-slate-100 border border-gray-300 rounded text-[13px] font-bold text-orange-500 hover:bg-white flex justify-center items-center gap-1.5 shadow-sm transition-colors"><Plus className="w-4 h-4"/> {editingLineItemId ? "Update Item" : "Add Item to Pallet"}</button>
               </div>
+            </div>
+            {/* ── Add to Pending Tasks (inline form) ─────────────────── */}
+            <div className="border-t border-gray-200 mx-4 pt-3 mb-2">
+              {!showPalletTodoForm ? (
+                <button
+                  onClick={() => setShowPalletTodoForm(true)}
+                  className="w-full py-2 border border-dashed border-gray-300 rounded text-[13px] font-semibold text-gray-500 hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4"/> Add to Pending Tasks
+                </button>
+              ) : (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <p className="text-[11px] font-black uppercase text-gray-500 tracking-wide mb-2">New Pending Task</p>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Lot #</label>
+                      <input type="text" value={palletTodoForm.lot_number}
+                        onChange={e => setPalletTodoForm(f => ({ ...f, lot_number: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        placeholder="LOT-001"/>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Boxes</label>
+                      <input type="number" value={palletTodoForm.boxes}
+                        onChange={e => {
+                          const boxes = e.target.value;
+                          setPalletTodoForm(f => ({ ...f, boxes, total_pcs: f.total_manual ? f.total_pcs : String(Number(boxes) * Number(f.qty_per_box)) }));
+                        }}
+                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        placeholder="0"/>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Qty / Box</label>
+                      <input type="number" value={palletTodoForm.qty_per_box}
+                        onChange={e => {
+                          const qpb = e.target.value;
+                          setPalletTodoForm(f => ({ ...f, qty_per_box: qpb, total_pcs: f.total_manual ? f.total_pcs : String(Number(f.boxes) * Number(qpb)) }));
+                        }}
+                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        placeholder="0"/>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Total Pcs</label>
+                      <input type="number" value={palletTodoForm.total_pcs}
+                        onChange={e => setPalletTodoForm(f => ({ ...f, total_pcs: e.target.value, total_manual: true }))}
+                        onFocus={() => setPalletTodoForm(f => ({ ...f, total_manual: true }))}
+                        className="w-full border border-orange-300 rounded-md px-2 py-1.5 text-[13px] font-bold focus:outline-none focus:ring-1 focus:ring-orange-500 bg-orange-50 text-orange-800"
+                        placeholder="auto"/>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Original Bin</label>
+                      <input type="text" value={palletTodoForm.original_bin}
+                        onChange={e => setPalletTodoForm(f => ({ ...f, original_bin: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        placeholder="A-12-3"/>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Action</label>
+                      <input type="text" value={palletTodoForm.action_required}
+                        onChange={e => setPalletTodoForm(f => ({ ...f, action_required: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
+                        placeholder="Move to staging"/>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        if (!palletTodoForm.lot_number.trim() || !palletTodoForm.original_bin.trim()) return;
+                        await supabase!.from('warehouse_todos').insert({
+                          lot_number: palletTodoForm.lot_number.trim(),
+                          boxes: Number(palletTodoForm.boxes) || 0,
+                          qty_per_box: Number(palletTodoForm.qty_per_box) || 0,
+                          total_pcs: Number(palletTodoForm.total_pcs) || 0,
+                          original_bin: palletTodoForm.original_bin.trim(),
+                          action_required: palletTodoForm.action_required.trim(),
+                        });
+                        setPalletTodoForm({ lot_number: '', boxes: '', qty_per_box: '', total_pcs: '', original_bin: '', action_required: '', total_manual: false });
+                        setShowPalletTodoForm(false);
+                      }}
+                      className="flex-1 py-1.5 bg-orange-600 text-white text-[13px] font-bold rounded-md hover:bg-orange-700 transition-colors"
+                    >
+                      Save Task
+                    </button>
+                    <button
+                      onClick={() => { setShowPalletTodoForm(false); setPalletTodoForm({ lot_number: '', boxes: '', qty_per_box: '', total_pcs: '', original_bin: '', action_required: '', total_manual: false }); }}
+                      className="px-3 py-1.5 border border-gray-300 text-[13px] font-medium text-gray-600 rounded-md hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="p-4 flex justify-end">
               <button onClick={() => setEditingPalletId(null)} className="px-5 py-2 bg-orange-500 text-white font-bold rounded shadow-sm hover:bg-orange-600 text-sm">Done & Close</button>
@@ -2156,12 +2833,12 @@ export default function App() {
       {isQuickEditOpen && editingOrder && (
          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-slate-900/60" onClick={closeAndNavigateSummary} />
-            <div className="relative bg-slate-100 rounded-md w-full max-w-md shadow-2xl flex flex-col">
+            <div className="relative bg-slate-100 rounded-md w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
               <div className="p-5 border-b border-gray-200 bg-white rounded-t-md flex justify-between items-center">
                  <h3 className="text-lg font-bold text-gray-800">Quick Edit: {editingOrder.id}</h3>
                  <button onClick={closeAndNavigateSummary} className="text-gray-500 hover:text-gray-800"><X className="w-5 h-5"/></button>
               </div>
-              <div className="p-6 space-y-4">
+              <div className="p-6 space-y-4 overflow-y-auto flex-1">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Order #</label>
                   <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-orange-400 font-bold ${editingOrder.id !== _activeOrderContext?.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
@@ -2185,6 +2862,7 @@ export default function App() {
                     <option value="Truck 4">Truck 4</option>
                     <option value="Truck 5">Truck 5</option>
                     <option value="Truck 6">Truck 6</option>
+                    <option value="House Account">House Account</option>
                   </select>
                 </div>
                 <div>
@@ -2239,6 +2917,7 @@ export default function App() {
             </div>
          </div>
       )}
+
     </div>
   );
 }
