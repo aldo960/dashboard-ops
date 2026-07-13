@@ -67,6 +67,21 @@ interface PalletLineItem {
   addedBy?: string;
 }
 
+interface ItemNote {
+  id: string;
+  itemNumber: string;
+  lot?: string;
+  note: string;
+  active: boolean;
+}
+
+interface PartnerPallet {
+  id: string;
+  number: string;
+  boxes: string;
+  weight: string;
+}
+
 interface PalletItem {
   id: string;
   number: number;
@@ -251,10 +266,21 @@ export default function App() {
   const [bulkTab, setBulkTab] = useState<'looms'|'standard'>('looms');
   const [bulkForm, setBulkForm] = useState({ loomSize: "15000", lineNo: "1", numPallets: "", weight: "", itemNo: "", boxes: "", qtyPerBox: "" });
 
+  const [showRenumberForm, setShowRenumberForm] = useState<boolean>(false);
+  const [renumberStartFrom, setRenumberStartFrom] = useState<number>(1);
+  const [partnerPalletList, setPartnerPalletList] = useState<PartnerPallet[]>([]);
+  const [partnerPalletForm, setPartnerPalletForm] = useState({ number: '', boxes: '', weight: '' });
+  const [mergingPalletId, setMergingPalletId] = useState<string | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string>('');
+
   const [detailsTab, setDetailsTab] = useState<'general' | 'packing_list' | 'weight_sheet' | 'items' | 'order_check'>('general');
   const [expandedCheckLines, setExpandedCheckLines] = useState<Record<string, boolean>>({});
   const [newItemNumberForm, setNewItemNumberForm] = useState("");
   const [newItemTargetQtyForm, setNewItemTargetQtyForm] = useState<number>(0);
+  const [newItemLineNoForm, setNewItemLineNoForm] = useState<string>("");
+  const [itemNotes, setItemNotes] = useState<ItemNote[]>([]);
+  const [newItemNoteForm, setNewItemNoteForm] = useState<string>("");
+  const [newItemLotForm, setNewItemLotForm] = useState<string>("");
   const [editingMasterItemId, setEditingMasterItemId] = useState<string | null>(null);
   const itemsEndRef = useRef<HTMLDivElement>(null);
 
@@ -263,10 +289,8 @@ export default function App() {
   const [labelSize, setLabelSize] = useState<'4x2' | '4x4'>('4x2');
   const [printTargetPallet, setPrintTargetPallet] = useState<PalletItem | null>(null);
   const [reportDate, setReportDate] = useState(getTodayUSFormat());
-  const [todos, setTodos] = useState<any[]>([]);
-  const [showPalletTodoForm, setShowPalletTodoForm] = useState(false);
+  const [, setTodos] = useState<any[]>([]);
   const [isTasksExpanded, setIsTasksExpanded] = useState(true);
-  const [palletTodoForm, setPalletTodoForm] = useState({ lot_number: '', boxes: '', qty_per_box: '', total_pcs: '', original_bin: '', action_required: '', total_manual: false });
   // --- Supabase Auth: restore session on load ---
   useEffect(() => {
     if (IS_PLACEHOLDER_CREDENTIALS) return;
@@ -386,6 +410,12 @@ export default function App() {
     };
     fetchTodos();
 
+    const fetchItemNotes = async () => {
+      const { data } = await supabase!.from('item_notes').select('*').eq('active', true);
+      if (data) setItemNotes(data.map((n: any) => ({ id: n.id, itemNumber: n.item_number, lot: n.lot || '', note: n.note, active: n.active })));
+    };
+    fetchItemNotes();
+
     // Suscripción a cambios en tiempo real en las 3 tablas
     const channel = supabase!
       .channel('public:all-tables')
@@ -409,6 +439,11 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_todos' }, () => {
         fetchTodos();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'item_notes' }, () => {
+        supabase!.from('item_notes').select('*').eq('active', true).then(({ data }) => {
+          if (data) setItemNotes(data.map((n: any) => ({ id: n.id, itemNumber: n.item_number, lot: n.lot || '', note: n.note, active: n.active })));
+        });
       })
       .subscribe();
 
@@ -674,16 +709,21 @@ const saveOrderToCloud = async (order: Order) => {
       let tLoom = 0, tNormal = 0, tBoxes = 0, tWeight = 0;
       const ordersData = (t.orders || []).map(o => {
         let oLoom = 0, oNormal = 0;
-        (o.palletList || []).forEach(p => {
-          const isLoom = (p.items || []).some(i => LOOM_SIZES.includes(i.itemNumber || ""));
-          if(isLoom) oLoom++; else oNormal++;
-        });
+        if (o.isManualOverride) {
+          oLoom   = Number(o.loomPallets)   || 0;
+          oNormal = Number(o.normalPallets) || 0;
+        } else {
+          (o.palletList || []).forEach(p => {
+            const isLoom = (p.items || []).some(i => LOOM_SIZES.includes(i.itemNumber || ""));
+            if(isLoom) oLoom++; else oNormal++;
+          });
+        }
         tLoom += oLoom; tNormal += oNormal;
         
         const calcWeight = (o.palletList || []).reduce((acc, p) => acc + parseFloat(String(p.weight||"0").replace(/,/g, '')||"0"), 0);
-        const calcBoxes = (o.palletList || []).reduce((acc, p) => acc + (Number(p.boxes)||0), 0);
-        
-        const finalBoxes = o.isManualOverride ? (Number(o.boxes) || 0) : calcBoxes;
+        const calcBoxes = (o.palletList || []).reduce((acc, p) => acc + (Number(p.boxes)||0), 0) + (Number(o.looseBoxes) || 0);
+
+        const finalBoxes = o.isManualOverride ? (Number(o.boxes) || 0) + (Number(o.looseBoxes) || 0) : calcBoxes;
         const manualW = parseFloat(String(o.weight||"0").replace(/,/g, ''));
         const finalWeight = o.isManualOverride ? (isNaN(manualW) ? 0 : manualW) : calcWeight;
 
@@ -727,11 +767,34 @@ const saveOrderToCloud = async (order: Order) => {
       pallets: 0, normalPallets: 0, loomPallets: 0, boxes: 0, weight: "0.00", truckId: assignedTruck, palletList: [], masterItems: [], isManualOverride: false
     };
     
+    // Check for duplicate ID
+    const isDuplicate = orders.some(o => o.id === newOrder.id);
+    if (isDuplicate) {
+      // Suggest a BO suffix
+      let suffix = '-BO'; let counter = 2;
+      while (orders.some(o => o.id === newOrder.id + suffix)) { suffix = `-BO${counter}`; counter++; }
+      const suggestedId = newOrder.id + suffix;
+      setConfirmDialog({
+        isOpen: true,
+        title: "Orden ya existe",
+        message: `La orden "${newOrder.id}" ya existe. Para un back order, se sugiere el ID: "${suggestedId}". ¿Deseas crearla con ese ID?`,
+        onConfirm: () => {
+          const boOrder = { ...newOrder, id: suggestedId };
+          setOrders(prev => [...prev, boOrder]);
+          saveOrderToCloud(boOrder);
+          setEditingOrder(boOrder);
+          setActiveOrderContext({ orderId: boOrder.id });
+          setDetailsTab('general');
+          setActiveTab("Order Details");
+          setNewOrderForm({ id: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
+          setConfirmDialog(null);
+        }
+      });
+      return;
+    }
+
     // Quick local update
-    setOrders(prev => {
-       if (prev.some(o => o.id === newOrder.id)) return prev;
-       return [...prev, newOrder];
-    });
+    setOrders(prev => [...prev, newOrder]);
     saveOrderToCloud(newOrder);
     
     setEditingOrder(newOrder);
@@ -782,6 +845,10 @@ const saveOrderToCloud = async (order: Order) => {
       if (originalId) await deleteOrderFromCloud(originalId);
       await saveOrderToCloud({ ...editingOrder, id: newId });
       setActiveOrderContext({ orderId: newId });
+    } else {
+      // Always do explicit save so no changes are lost when closing
+      setOrders(prev => prev.map(o => o.id === editingOrder.id ? editingOrder : o));
+      await saveOrderToCloud(editingOrder);
     }
     closeAndNavigateSummary();
   };
@@ -813,12 +880,44 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
     if (!editingOrder || !newItemNumberForm.trim()) return;
     const trimmed = newItemNumberForm.trim();
 
-    // EDIT MODE: update existing item
+    // EDIT MODE: update existing item — single atomic state update to avoid stale closure overwrite
     if (editingMasterItemId) {
-      await handleUpdateMasterItem(editingMasterItemId, 'itemNumber', trimmed);
-      await handleUpdateMasterItem(editingMasterItemId, 'orderedQty', newItemTargetQtyForm || 0);
+      const updatedLineNo = newItemLineNoForm.trim() || undefined;
+      // Update local state once with all changes
+      setEditingOrder(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          masterItems: (prev.masterItems || [])
+            .map(m => m.id === editingMasterItemId
+              ? { ...m, itemNumber: trimmed, orderedQty: newItemTargetQtyForm || 0, ...(updatedLineNo ? { lineNo: updatedLineNo } : {}) }
+              : m
+            )
+            .sort((a, b) => parseInt(a.lineNo) - parseInt(b.lineNo))
+        };
+      });
+      // DB updates
+      if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+        await supabase.from('order_items').update({ item_number: trimmed, ordered_qty: newItemTargetQtyForm || 0, ...(updatedLineNo ? { line_no: updatedLineNo } : {}) }).eq('id', editingMasterItemId);
+        if (newItemNoteForm.trim()) {
+          await supabase.from('item_notes').upsert({
+            item_number: trimmed,
+            lot: newItemLotForm.trim() || null,
+            note: newItemNoteForm.trim(),
+            active: true,
+          }, { onConflict: 'item_number' });
+          setItemNotes(prev => {
+            const exists = prev.find(n => n.itemNumber === trimmed);
+            if (exists) return prev.map(n => n.itemNumber === trimmed ? { ...n, lot: newItemLotForm.trim(), note: newItemNoteForm.trim() } : n);
+            return [...prev, { id: Date.now().toString(), itemNumber: trimmed, lot: newItemLotForm.trim(), note: newItemNoteForm.trim(), active: true }];
+          });
+        }
+      }
       setNewItemNumberForm("");
       setNewItemTargetQtyForm(0);
+      setNewItemLineNoForm("");
+      setNewItemNoteForm("");
+      setNewItemLotForm("");
       setEditingMasterItemId(null);
       setTimeout(() => (document.getElementById('item-number-input') as HTMLInputElement)?.focus(), 50);
       return;
@@ -827,17 +926,34 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
     // ADD MODE
     const currentLines = editingOrder.masterItems || [];
     const nextLineNo = currentLines.length > 0 ? Math.max(...currentLines.map(m => parseInt(m.lineNo) || 0)) + 1 : 1;
+    const resolvedLineNo = newItemLineNoForm.trim() ? newItemLineNoForm.trim() : nextLineNo.toString();
 
     const doAdd = async () => {
-      const newMaster: MasterItem = { id: `m_${Date.now()}`, lineNo: nextLineNo.toString(), itemNumber: trimmed, orderedBoxes: 0, orderedQty: newItemTargetQtyForm || 0 };
-      setEditingOrder({ ...editingOrder, masterItems: [...currentLines, newMaster] });
+      const newMaster: MasterItem = { id: `m_${Date.now()}`, lineNo: resolvedLineNo, itemNumber: trimmed, orderedBoxes: 0, orderedQty: newItemTargetQtyForm || 0 };
+      setEditingOrder({ ...editingOrder, masterItems: [...currentLines, newMaster].sort((a, b) => parseInt(a.lineNo) - parseInt(b.lineNo)) });
       setNewItemNumberForm("");
       setNewItemTargetQtyForm(0);
+      setNewItemLineNoForm("");
+      setNewItemNoteForm("");
+      setNewItemLotForm("");
       setTimeout(() => (document.getElementById('item-number-input') as HTMLInputElement)?.focus(), 50);
       if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
         isSavingRef.current = true; savingCountRef.current++;
         await supabase.from('order_items').insert({ id: newMaster.id, order_id: editingOrder.id, line_no: newMaster.lineNo, item_number: newMaster.itemNumber, ordered_boxes: 0, ordered_qty: newMaster.orderedQty });
         setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+      }
+      if (newItemNoteForm.trim() && !IS_PLACEHOLDER_CREDENTIALS && supabase) {
+        await supabase.from('item_notes').upsert({
+          item_number: trimmed,
+          lot: newItemLotForm.trim() || null,
+          note: newItemNoteForm.trim(),
+          active: true,
+        }, { onConflict: 'item_number' });
+        setItemNotes(prev => {
+          const exists = prev.find(n => n.itemNumber === trimmed);
+          if (exists) return prev.map(n => n.itemNumber === trimmed ? { ...n, lot: newItemLotForm.trim(), note: newItemNoteForm.trim() } : n);
+          return [...prev, { id: Date.now().toString(), itemNumber: trimmed, lot: newItemLotForm.trim(), note: newItemNoteForm.trim(), active: true }];
+        });
       }
     };
 
@@ -846,7 +962,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
       setConfirmDialog({
         isOpen: true,
         title: "Item duplicado",
-        message: `El item "${trimmed}" ya fue agregado en la Línea ${duplicate.lineNo}. ¿Deseas agregarlo de todas formas?`,
+        message: `Item "${trimmed}" was already added on Line ${duplicate.lineNo}. Do you want to add it anyway?`,
         onConfirm: () => { doAdd(); setConfirmDialog(null); }
       });
     } else {
@@ -893,6 +1009,44 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
       isSavingRef.current = true;
       savingCountRef.current++;
       await supabase.from('pallets').insert({ id: newPallet.id, order_id: editingOrder.id, number: newPallet.number, weight: newPallet.weight, boxes: 0 });
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
+  };
+
+  const handleRenumberPallets = async () => {
+    if (!editingOrder?.palletList) return;
+    const sorted = [...editingOrder.palletList].sort((a, b) => a.number - b.number);
+    const renumbered = sorted.map((p, i) => ({ ...p, number: renumberStartFrom + i }));
+    setEditingOrder({ ...editingOrder, palletList: renumbered });
+    setShowRenumberForm(false);
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      await Promise.all(renumbered.map(p => supabase!.from('pallets').update({ number: p.number }).eq('id', p.id)));
+    }
+  };
+
+  const handleMergePallets = async () => {
+    if (!editingOrder?.palletList || !mergingPalletId || !mergeTargetId) return;
+    const source = editingOrder.palletList.find(p => p.id === mergingPalletId);
+    const target = editingOrder.palletList.find(p => p.id === mergeTargetId);
+    if (!source || !target) return;
+    const mergedItems = [...(target.items || []), ...(source.items || [])];
+    const mergedBoxes = (Number(target.boxes) || 0) + (Number(source.boxes) || 0);
+    const updatedList = editingOrder.palletList.map(p => {
+      if (p.id === mergeTargetId) return { ...p, items: mergedItems, boxes: mergedBoxes };
+      if (p.id === mergingPalletId) return { ...p, items: [], boxes: 0 };
+      return p;
+    });
+    setEditingOrder({ ...editingOrder, palletList: updatedList });
+    setMergingPalletId(null);
+    setMergeTargetId('');
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true;
+      savingCountRef.current++;
+      await Promise.all((source.items || []).map(item =>
+        supabase!.from('pallet_items').update({ pallet_id: mergeTargetId }).eq('id', item.id)
+      ));
+      await supabase!.from('pallets').update({ boxes: mergedBoxes }).eq('id', mergeTargetId);
+      await supabase!.from('pallets').update({ boxes: 0 }).eq('id', mergingPalletId);
       setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
     }
   };
@@ -1280,7 +1434,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
 
         {/* Zero margins for label print modes */}
         {(printMode === 'labels_all' || printMode === 'label_single') && (
-          <style>{`@media print { @page { margin: 0; } body { margin: 0; } }`}</style>
+          <style>{`@page { margin: 0; } @media print { body { margin: 0; padding: 0; } }`}</style>
         )}
 
         {/* LABELS */}
@@ -1418,35 +1572,123 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             <div className="mb-3 text-xs">
               <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po}</p>
               <p><b>Ship Date:</b> {editingOrder?.shipmentDate} &nbsp;|&nbsp; <b>Total Boxes:</b> {totals.boxes.toLocaleString()}</p>
+              {(() => {
+                const myPallets = editingOrder?.palletList?.length || 0;
+                const partnerCount = partnerPalletList.length;
+                const myWeight = Number(totals.weight || 0);
+                const partnerW = partnerPalletList.reduce((s, p) => s + (parseFloat((p.weight||'').replace(/,/g,'')) || 0), 0);
+                const combinedWeight = myWeight + partnerW;
+                return (
+                  <p>
+                    <b>Total Pallets:</b> {myPallets + partnerCount}
+                    &nbsp;|&nbsp;
+                    <b>Total Weight:</b> {combinedWeight > 0 ? combinedWeight.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' lbs' : '—'}
+                  </p>
+                );
+              })()}
             </div>
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-gray-100 uppercase text-[10px] text-gray-600">
-                  <th className="px-3 py-1.5 border-b border-gray-300">Pallet ID</th>
-                  <th className="px-3 py-1.5 border-b border-gray-300 text-center">Total Boxes on Pallet</th>
-                  <th className="px-3 py-1.5 border-b border-gray-300 text-right">Weight (lbs)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {editingOrder?.palletList?.map(p => {
-                  const displayWeight = p.weight && p.weight !== "0.00" && p.weight !== "0" ? p.weight : "";
-                  return (
-                    <tr key={p.id} className="border-b border-gray-200">
-                      <td className="px-3 py-1.5 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
-                      <td className="px-3 py-1.5 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
-                      <td className="px-3 py-1.5 text-right"><div className="inline-block min-w-[90px] h-5 border-b border-gray-400">{displayWeight}</div></td>
+
+            {/* BO Section — shown right below order info */}
+            {editingOrder && (() => {
+              const pendingItems = (editingOrder.masterItems || [])
+                .filter(m => {
+                  const ordQty = Number(m.orderedQty) || 0;
+                  if (ordQty === 0) return false;
+                  const packed = getPackedQtyForLine(m.lineNo, editingOrder);
+                  return packed < ordQty;
+                })
+                .map(m => ({
+                  lineNo: m.lineNo,
+                  itemNumber: m.itemNumber,
+                  orderedQty: Number(m.orderedQty) || 0,
+                  packedQty: getPackedQtyForLine(m.lineNo, editingOrder),
+                  missingQty: Math.max(0, (Number(m.orderedQty) || 0) - getPackedQtyForLine(m.lineNo, editingOrder)),
+                }));
+              if (pendingItems.length === 0) return null;
+              return (
+                <div className="mb-3 border border-gray-800 rounded p-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-800 mb-1.5">⚠ Pending / Back Orders</p>
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-gray-100 uppercase text-[10px] text-gray-600">
+                        <th className="px-2 py-1 border border-gray-400">Line #</th>
+                        <th className="px-2 py-1 border border-gray-400">Item #</th>
+                        <th className="px-2 py-1 border border-gray-400 text-right">Ordered</th>
+                        <th className="px-2 py-1 border border-gray-400 text-right">Shipped</th>
+                        <th className="px-2 py-1 border border-gray-400 text-right">Missing (pcs)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingItems.map((item, i) => (
+                        <tr key={i} className={item.packedQty === 0 ? 'bg-red-50' : ''}>
+                          <td className="px-2 py-1 border border-gray-300 font-bold">{item.lineNo}</td>
+                          <td className="px-2 py-1 border border-gray-300">{item.itemNumber || '—'}</td>
+                          <td className="px-2 py-1 border border-gray-300 text-right">{item.orderedQty.toLocaleString()}</td>
+                          <td className="px-2 py-1 border border-gray-300 text-right">{item.packedQty.toLocaleString()}</td>
+                          <td className="px-2 py-1 border border-gray-300 text-right font-bold text-red-700">{item.missingQty.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+
+            {(() => {
+              const partnerBoxes = partnerPalletList.reduce((s, p) => s + (Number(p.boxes)||0), 0);
+              const partnerW = partnerPalletList.reduce((s, p) => s + (parseFloat((p.weight||'').replace(/,/g,'')) || 0), 0);
+              const grandBoxes = Number(totals.boxes || 0) + partnerBoxes;
+              const grandWeight = Number(totals.weight || 0) + partnerW;
+              return (
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-100 uppercase text-[10px] text-gray-600">
+                      <th className="px-3 py-1.5 border-b border-gray-300">Pallet ID</th>
+                      <th className="px-3 py-1.5 border-b border-gray-300 text-center">Total Boxes on Pallet</th>
+                      <th className="px-3 py-1.5 border-b border-gray-300 text-right">Weight (lbs)</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
-                  <td className="px-3 py-2 text-gray-800">TOTAL</td>
-                  <td className="px-3 py-2 text-center text-gray-800">{Number(totals.boxes||0).toLocaleString()}</td>
-                  <td className="px-3 py-2 text-right text-gray-900">{Number(totals.weight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lbs</td>
-                </tr>
-              </tfoot>
-            </table>
+                  </thead>
+                  <tbody>
+                    {[
+                      ...(editingOrder?.palletList || []).map(p => ({ kind: 'mine' as const, sortNum: p.number, data: p })),
+                      ...partnerPalletList.map(pp => ({ kind: 'partner' as const, sortNum: Number(pp.number) || 0, data: pp })),
+                    ].sort((a, b) => a.sortNum - b.sortNum).map(entry => {
+                      if (entry.kind === 'mine') {
+                        const p = entry.data;
+                        const displayWeight = p.weight && p.weight !== "0.00" && p.weight !== "0" ? p.weight : "";
+                        return (
+                          <tr key={p.id} className="border-b border-gray-200">
+                            <td className="px-3 py-1.5 text-gray-800 font-medium">Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</td>
+                            <td className="px-3 py-1.5 text-center text-gray-800">{Number(p.boxes||0).toLocaleString()}</td>
+                            <td className="px-3 py-1.5 text-right"><div className="inline-block min-w-[90px] h-5 border-b border-gray-400">{displayWeight}</div></td>
+                          </tr>
+                        );
+                      } else {
+                        const pp = entry.data;
+                        const w = parseFloat((pp.weight||'').replace(/,/g,'')) || 0;
+                        return (
+                          <tr key={pp.id} className="border-b border-gray-200">
+                            <td className="px-3 py-1.5 text-gray-800 font-medium">Pallet {pp.number}</td>
+                            <td className="px-3 py-1.5 text-center text-gray-800">{Number(pp.boxes||0).toLocaleString()}</td>
+                            <td className="px-3 py-1.5 text-right"><div className="inline-block min-w-[90px] h-5 border-b border-gray-400">{w > 0 ? pp.weight : ''}</div></td>
+                          </tr>
+                        );
+                      }
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-100 font-bold border-t-2 border-gray-400">
+                      <td className="px-3 py-2 text-gray-800">GRAND TOTAL</td>
+                      <td className="px-3 py-2 text-center text-gray-800">{grandBoxes.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-gray-900">
+                        {grandWeight > 0 ? grandWeight.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' lbs' : ''}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              );
+            })()}
+
           </div>
         )}
 
@@ -1645,7 +1887,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
               </div>
             </div>
 
-            {/* ── WAREHOUSE PENDING TASKS ─────────────────────────────── */}
+            {/* ── NOTAS DE ITEMS ─────────────────────────────── */}
             <section className="mb-8">
               <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                 {/* Header — always visible */}
@@ -1654,52 +1896,44 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                     onClick={() => setIsTasksExpanded(v => !v)}
                     className="flex items-center gap-2 flex-1 text-left"
                   >
-                    <Package className="w-4 h-4 text-orange-500 flex-shrink-0"/>
-                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Warehouse Pending Tasks</h2>
-                    {todos.filter(t => !t.is_completed).length > 0 && (
-                      <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">
-                        {todos.filter(t => !t.is_completed).length}
+                    <Package className="w-4 h-4 text-amber-500 flex-shrink-0"/>
+                    <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Item Notes</h2>
+                    {itemNotes.length > 0 && (
+                      <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">
+                        {itemNotes.length}
                       </span>
                     )}
                     <ChevronDown className={`w-4 h-4 text-gray-400 ml-1 transition-transform flex-shrink-0 ${isTasksExpanded ? 'rotate-180' : ''}`}/>
                   </button>
-                  <button
-                    onClick={async () => {
-                      const completed = todos.filter(t => t.is_completed);
-                      if (completed.length === 0) return;
-                      await supabase!.from('warehouse_todos').delete().in('id', completed.map(t => t.id));
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-red-500 border border-red-200 bg-red-50 rounded-md hover:bg-red-100 transition-colors ml-3"
-                  >
-                    <Trash2 className="w-3 h-3"/> Clear Completed
-                  </button>
                 </div>
-                {/* Task list — collapsible */}
+                {/* Notes list — collapsible */}
                 {isTasksExpanded && (
                   <div className="divide-y divide-gray-100">
-                    {todos.length === 0 && (
-                      <p className="text-center text-gray-400 text-sm py-6 font-medium">No pending tasks</p>
+                    {itemNotes.length === 0 && (
+                      <p className="text-center text-gray-400 text-sm py-6 font-medium">No item notes</p>
                     )}
-                    {todos.map(todo => (
-                      <div key={todo.id} className={`flex items-start gap-3 px-5 py-3 transition-colors ${todo.is_completed ? 'bg-gray-50 opacity-50' : 'hover:bg-orange-50/20'}`}>
-                        <input type="checkbox" checked={todo.is_completed}
-                          onChange={async () => { await supabase!.from('warehouse_todos').update({ is_completed: !todo.is_completed }).eq('id', todo.id); }}
-                          className="mt-0.5 w-4 h-4 rounded accent-orange-500 cursor-pointer flex-shrink-0"/>
+                    {itemNotes.map(note => (
+                      <div key={note.id} className="flex items-start gap-3 px-5 py-3 hover:bg-amber-50/20 transition-colors">
+                        <span className="text-amber-500 mt-0.5 flex-shrink-0 text-base">⚠</span>
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`font-black text-sm ${todo.is_completed ? 'line-through text-gray-400' : 'text-slate-800'}`}>{todo.lot_number}</span>
-                            <span className="text-[11px] bg-orange-100 text-orange-700 font-bold px-1.5 py-0.5 rounded">{Number(todo.total_pcs).toLocaleString()} pcs</span>
-                            <span className="text-[11px] text-gray-500 font-medium">{todo.boxes} bxs × {todo.qty_per_box}/bx</span>
+                            <span className="font-black text-sm text-slate-800">{note.itemNumber}</span>
+                            {note.lot && <span className="text-[11px] bg-amber-100 text-amber-700 font-bold px-1.5 py-0.5 rounded">{note.lot}</span>}
                           </div>
-                          <div className="flex flex-wrap gap-3 mt-0.5 text-[11px] text-gray-500">
-                            <span>📍 <b>From:</b> {todo.original_bin}</span>
-                            {todo.moved_to && <span>➡️ <b>To:</b> {todo.moved_to}</span>}
-                            {todo.action_required && <span>⚡ {todo.action_required}</span>}
-                          </div>
+                          <p className="text-[12px] text-gray-600 mt-0.5">{note.note}</p>
                         </div>
-                        <span className="text-[10px] text-gray-400 flex-shrink-0 mt-0.5">
-                          {new Date(todo.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </span>
+                        <button
+                          onClick={async () => {
+                            if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+                              await supabase.from('item_notes').update({ active: false }).eq('id', note.id);
+                              setItemNotes(prev => prev.filter(n => n.id !== note.id));
+                            }
+                          }}
+                          className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0 mt-0.5"
+                          title="Eliminar nota"
+                        >
+                          <X className="w-3.5 h-3.5"/>
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -2175,6 +2409,26 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                       <button onClick={() => triggerPrint('pallet_sheets_all')} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><Printer className="w-4 h-4"/> Print All Sheets</button>
                       <button onClick={() => triggerPrint('labels_all')} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm"><Printer className="w-4 h-4"/> Print All Labels</button>
                       <button onClick={() => setIsBulkModalOpen(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 shadow-sm"><Database className="w-4 h-4"/> Add Bulk</button>
+                      {/* Renumber pallets */}
+                      {showRenumberForm ? (
+                        <div className="flex items-center gap-1.5 bg-white border border-gray-300 rounded px-2 py-1 shadow-sm">
+                          <span className="text-xs text-gray-600 font-medium">Start from #</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={renumberStartFrom}
+                            onChange={e => setRenumberStartFrom(parseInt(e.target.value) || 1)}
+                            className="w-14 border border-gray-300 rounded px-1.5 py-0.5 text-sm outline-none focus:border-orange-400"
+                            autoFocus
+                          />
+                          <button onClick={handleRenumberPallets} className="px-2 py-0.5 bg-orange-500 text-white rounded text-xs font-bold hover:bg-orange-600">OK</button>
+                          <button onClick={() => setShowRenumberForm(false)} className="px-2 py-0.5 border border-gray-300 rounded text-xs text-gray-500 hover:bg-gray-50">✕</button>
+                        </div>
+                      ) : (
+                        <button onClick={() => { setShowRenumberForm(true); setRenumberStartFrom(1); }} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 rounded text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shadow-sm">
+                          <ArrowRightLeft className="w-4 h-4"/> Renumber
+                        </button>
+                      )}
                       <button onClick={handleAddPallet} className="flex items-center gap-1.5 px-4 py-1.5 bg-orange-500 text-white rounded text-sm font-bold hover:bg-orange-600 shadow-sm"><Plus className="w-4 h-4"/> Add Pallet</button>
                     </div>
                   </div>
@@ -2208,6 +2462,37 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                               )}
                             </div>
 
+                            <div className="relative">
+                              <button
+                                onClick={() => { setMergingPalletId(mergingPalletId === pallet.id ? null : pallet.id); setMergeTargetId(''); }}
+                                title="Merge items into another pallet"
+                              >
+                                <Copy className="w-4 h-4 hover:text-gray-800"/>
+                              </button>
+                              {mergingPalletId === pallet.id && (
+                                <div className="absolute right-0 mt-2 bg-white border border-gray-200 shadow-xl rounded p-2.5 z-20 w-64 flex flex-col gap-2">
+                                  <p className="text-[11px] font-bold text-gray-600 uppercase tracking-wide">Merge all items into:</p>
+                                  <select
+                                    value={mergeTargetId}
+                                    onChange={e => setMergeTargetId(e.target.value)}
+                                    className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-orange-400"
+                                  >
+                                    <option value="">Select pallet...</option>
+                                    {editingOrder.palletList?.filter(p => p.id !== pallet.id).map(p => (
+                                      <option key={p.id} value={p.id}>Pallet {p.number} ({p.boxes} boxes)</option>
+                                    ))}
+                                  </select>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={handleMergePallets}
+                                      disabled={!mergeTargetId}
+                                      className="flex-1 bg-orange-500 text-white px-2 py-1 rounded text-xs font-bold hover:bg-orange-600 disabled:opacity-40"
+                                    >Merge</button>
+                                    <button onClick={() => setMergingPalletId(null)} className="px-2 py-1 border border-gray-300 rounded text-xs text-gray-500 hover:bg-gray-50">Cancel</button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                             <button onClick={() => setEditingPalletId(pallet.id)}><Pencil className="w-4 h-4 hover:text-gray-800"/></button>
                             <button onClick={() => setConfirmDialog({isOpen:true, title:"Delete Pallet", message:"Are you sure you want to delete this pallet?", onConfirm: () => executeDeletePallet(pallet.id)})} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4"/></button>
                           </div>
@@ -2320,8 +2605,17 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                   <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-4">
                      <div>
                        <h2 className="text-2xl font-bold text-orange-500 mb-2">Weight Sheet</h2>
-                       <div className="text-sm text-gray-600 font-medium">
-                         <p>Order #: {editingOrder.id}</p><p>PO: {editingOrder.po}</p><p>Ship Date: {editingOrder.shipmentDate}</p><p>Total Boxes: {totals.boxes}</p>
+                       <div className="text-sm text-gray-600 font-medium space-y-0.5">
+                         <p>Order #: {editingOrder.id}</p>
+                         <p>PO: {editingOrder.po}</p>
+                         <p>Ship Date: {editingOrder.shipmentDate}</p>
+                         <p>Total Boxes: <b>{Number(totals.boxes||0).toLocaleString()}</b></p>
+                         <p>Total Pallets: <b>{(editingOrder?.palletList?.length || 0) + partnerPalletList.length}</b>
+                           {partnerPalletList.length > 0 && <span className="text-gray-400 text-xs ml-1">(my {editingOrder?.palletList?.length || 0} + partner {partnerPalletList.length})</span>}
+                         </p>
+                         {Number(totals.weight||0) > 0 && (
+                           <p>Total Weight: <b>{Number(totals.weight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lbs</b></p>
+                         )}
                        </div>
                      </div>
                      <button onClick={() => triggerPrint('weight_sheet')} className="px-4 py-2 border border-gray-300 bg-gray-50 text-gray-800 rounded font-bold flex gap-2 hover:bg-gray-100"><Printer className="w-4 h-4"/> Print Sheet</button>
@@ -2372,21 +2666,138 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                       </tr>
                     </tfoot>
                   </table>
+
+                  {/* Partner section */}
+                  <div className="mt-6 border-t border-gray-200 pt-5">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Partner Pallets (Optional — For Combined Totals)</p>
+                    {/* Add pallet form */}
+                    <div className="flex flex-wrap gap-2 items-end mb-3">
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Pallet #</label>
+                        <input
+                          type="text"
+                          value={partnerPalletForm.number}
+                          onChange={e => setPartnerPalletForm(f => ({...f, number: e.target.value}))}
+                          placeholder="e.g. 1"
+                          className="w-20 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-orange-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Boxes</label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={partnerPalletForm.boxes}
+                          onChange={e => setPartnerPalletForm(f => ({...f, boxes: e.target.value}))}
+                          placeholder="0"
+                          className="w-20 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-orange-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Weight (lbs)</label>
+                        <input
+                          type="text"
+                          value={partnerPalletForm.weight}
+                          onChange={e => setPartnerPalletForm(f => ({...f, weight: e.target.value}))}
+                          placeholder="0.00"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (!partnerPalletForm.number.trim()) return;
+                              setPartnerPalletList(prev => [...prev, { id: Date.now().toString(), ...partnerPalletForm }]);
+                              setPartnerPalletForm({ number: '', boxes: '', weight: '' });
+                            }
+                          }}
+                          className="w-28 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-orange-400"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (!partnerPalletForm.number.trim()) return;
+                          setPartnerPalletList(prev => [...prev, { id: Date.now().toString(), ...partnerPalletForm }]);
+                          setPartnerPalletForm({ number: '', boxes: '', weight: '' });
+                        }}
+                        className="px-3 py-1.5 bg-orange-500 text-white text-sm rounded font-bold hover:bg-orange-600"
+                      >Add Pallet</button>
+                      {partnerPalletList.length > 0 && (
+                        <button onClick={() => setPartnerPalletList([])} className="text-xs text-gray-400 hover:text-red-500 ml-1">Clear All</button>
+                      )}
+                    </div>
+
+                    {/* Partner pallet table */}
+                    {partnerPalletList.length > 0 && (() => {
+                      const partnerBoxes = partnerPalletList.reduce((s, p) => s + (Number(p.boxes)||0), 0);
+                      const partnerW = partnerPalletList.reduce((s, p) => s + (parseFloat((p.weight||'').replace(/,/g,'')) || 0), 0);
+                      return (
+                        <>
+                          <table className="w-full text-sm text-left border border-gray-200 mb-3">
+                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                              <tr>
+                                <th className="p-2 border-b border-gray-200">Pallet #</th>
+                                <th className="p-2 border-b border-gray-200 text-center">Boxes</th>
+                                <th className="p-2 border-b border-gray-200 text-right">Weight (lbs)</th>
+                                <th className="p-2 border-b border-gray-200 w-8"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {partnerPalletList.map(pp => (
+                                <tr key={pp.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                  <td className="p-2 font-medium">Pallet {pp.number}</td>
+                                  <td className="p-2 text-center">{Number(pp.boxes||0).toLocaleString()}</td>
+                                  <td className="p-2 text-right">{pp.weight || '—'}</td>
+                                  <td className="p-2 text-center">
+                                    <button onClick={() => setPartnerPalletList(prev => prev.filter(x => x.id !== pp.id))} className="text-gray-300 hover:text-red-400">
+                                      <X className="w-3 h-3"/>
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="bg-gray-100 font-bold border-t-2 border-gray-300 text-sm">
+                                <td className="p-2">Partner Total</td>
+                                <td className="p-2 text-center">{partnerBoxes.toLocaleString()}</td>
+                                <td className="p-2 text-right">{partnerW > 0 ? partnerW.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' lbs' : '—'}</td>
+                                <td></td>
+                              </tr>
+                            </tfoot>
+                          </table>
+                          <div className="text-sm font-bold text-gray-800 bg-orange-50 border border-orange-200 rounded p-3 flex gap-6">
+                            <span>Combined Pallets: <b className="text-orange-600">{(editingOrder?.palletList?.length || 0) + partnerPalletList.length}</b></span>
+                            <span>Combined Boxes: <b className="text-orange-600">{(Number(totals.boxes||0) + partnerBoxes).toLocaleString()}</b></span>
+                            <span>Combined Weight: <b className="text-orange-600">{(Number(totals.weight||0) + partnerW) > 0 ? (Number(totals.weight||0) + partnerW).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' lbs' : '—'}</b></span>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
                </div>
             )}
 
             {/* TAB: ITEMS */}
             {detailsTab === 'items' && (
                <div className="bg-white border border-gray-200 rounded-md p-8 shadow-sm animate-in fade-in max-w-3xl">
-                  <h2 className="text-xl font-bold text-gray-800 mb-6">Item Verification (Order {editingOrder.id})</h2>
+                  <div className="flex items-center gap-3 mb-6">
+                    <h2 className="text-xl font-bold text-gray-800">Item Verification (Order {editingOrder.id})</h2>
+                    {(() => {
+                      const count = (editingOrder.masterItems || []).filter(m => itemNotes.find(n => n.itemNumber === m.itemNumber)).length;
+                      return count > 0 ? (
+                        <span className="text-[11px] font-black bg-amber-100 text-amber-700 border border-amber-300 px-2.5 py-1 rounded-full">
+                          ⚠ {count} item{count > 1 ? 's' : ''} need{count === 1 ? 's' : ''} attention
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
                   {(() => {
                     const currentLines = editingOrder.masterItems || [];
                     const nextLineNo = currentLines.length > 0 ? Math.max(...currentLines.map(m => parseInt(m.lineNo) || 0)) + 1 : 1;
                     return (
                       <div className="mb-8">
                         <div className="flex items-center gap-2 mb-2">
-                          <span className="text-sm text-gray-500 font-medium">Agregando:</span>
-                          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-0.5 rounded-full">Línea {nextLineNo}</span>
+                          <span className="text-sm text-gray-500 font-medium">{editingMasterItemId ? 'Editing:' : 'Adding:'}</span>
+                          <span className="bg-orange-500 text-white text-sm font-bold px-3 py-0.5 rounded-full">
+                            Line {newItemLineNoForm.trim() ? newItemLineNoForm.trim() : (editingMasterItemId ? (editingOrder.masterItems?.find(m=>m.id===editingMasterItemId)?.lineNo ?? nextLineNo) : nextLineNo)}
+                          </span>
                         </div>
                         <div className="flex flex-col gap-3 bg-gray-50 p-4 rounded border border-gray-200">
                           <div className="flex gap-3">
@@ -2400,6 +2811,19 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                                 placeholder="e.g. SKU-12345"
                                 className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
                                 autoFocus
+                              />
+                            </div>
+                            <div className="w-20">
+                              <label className="block text-[11px] font-bold text-gray-500 mb-1 uppercase tracking-wide">Line #</label>
+                              <input
+                                id="item-line-no-input"
+                                type="number"
+                                min="1"
+                                value={newItemLineNoForm}
+                                onChange={e => setNewItemLineNoForm(e.target.value)}
+                                onKeyDown={e => { if(e.key === 'Enter') { e.preventDefault(); (document.getElementById('item-target-qty') as HTMLInputElement)?.focus(); } }}
+                                placeholder={String(nextLineNo)}
+                                className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
                               />
                             </div>
                             <div className="w-36">
@@ -2416,9 +2840,29 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                               />
                             </div>
                           </div>
+                          <div className="flex gap-3">
+                            <div className="w-36">
+                              <label className="block text-[11px] font-bold text-gray-500 mb-1 uppercase tracking-wide">Lot (optional)</label>
+                              <input
+                                value={newItemLotForm}
+                                onChange={e => setNewItemLotForm(e.target.value)}
+                                placeholder="LOT-001"
+                                className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-[11px] font-bold text-gray-500 mb-1 uppercase tracking-wide">Item Note (optional)</label>
+                              <input
+                                value={newItemNoteForm}
+                                onChange={e => setNewItemNoteForm(e.target.value)}
+                                placeholder="e.g. Different design lot, do not pick"
+                                className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
+                              />
+                            </div>
+                          </div>
                           <div className="flex gap-2">
                             <button onClick={handleAddMasterItem} className="flex-1 bg-white border border-gray-300 px-4 py-2 rounded text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-50"><Plus className="w-4 h-4"/> {editingMasterItemId ? 'Update Item' : 'Add to List'}</button>
-                            {editingMasterItemId && <button onClick={() => { setEditingMasterItemId(null); setNewItemNumberForm(""); setNewItemTargetQtyForm(0); }} className="px-3 py-2 rounded text-sm border border-gray-300 text-gray-500 hover:bg-gray-50">Cancel</button>}
+                            {editingMasterItemId && <button onClick={() => { setEditingMasterItemId(null); setNewItemNumberForm(""); setNewItemTargetQtyForm(0); setNewItemLineNoForm(""); setNewItemNoteForm(""); setNewItemLotForm(""); }} className="px-3 py-2 rounded text-sm border border-gray-300 text-gray-500 hover:bg-gray-50">Cancel</button>}
                           </div>
                         </div>
                       </div>
@@ -2438,13 +2882,23 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                       {editingOrder.masterItems?.map(m => (
                         <tr key={m.id} className="border-b border-gray-200 bg-white">
                           <td className="p-3 font-bold text-gray-700">{m.lineNo}</td>
-                          <td className="p-3">{m.itemNumber}</td>
+                          <td className="p-3 border-b border-gray-200">
+                            <div className="flex flex-col gap-0.5">
+                              <span>{m.itemNumber}</span>
+                              {(() => {
+                                const note = itemNotes.find(n => n.itemNumber === m.itemNumber);
+                                return note ? (
+                                  <span className="text-[11px] text-amber-600 font-bold">⚠ {note.lot ? `[${note.lot}] ` : ''}{note.note}</span>
+                                ) : null;
+                              })()}
+                            </div>
+                          </td>
                           <td className="p-3 text-center">
                             <input type="number" min="0" value={m.orderedQty || ""} onChange={e => handleUpdateMasterItem(m.id, 'orderedQty', Number(e.target.value))} className="w-24 border border-gray-300 rounded p-1.5 text-sm outline-none text-center focus:border-orange-400" placeholder="0"/>
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex gap-2 justify-end">
-                              <button onClick={() => { setEditingMasterItemId(m.id); setNewItemNumberForm(m.itemNumber); setNewItemTargetQtyForm(m.orderedQty || 0); setTimeout(()=>(document.getElementById('item-number-input') as HTMLInputElement)?.focus(),50); }} className="text-orange-400 hover:text-orange-600"><Pencil className="w-4 h-4"/></button>
+                              <button onClick={() => { setEditingMasterItemId(m.id); setNewItemNumberForm(m.itemNumber); setNewItemTargetQtyForm(m.orderedQty || 0); setNewItemLineNoForm(m.lineNo || ""); setNewItemNoteForm(""); setNewItemLotForm(""); setTimeout(()=>(document.getElementById('item-number-input') as HTMLInputElement)?.focus(),50); }} className="text-orange-400 hover:text-orange-600"><Pencil className="w-4 h-4"/></button>
                               <button onClick={() => handleDeleteMasterItem(m.id)} className="text-red-400 hover:text-red-600"><Trash2 className="w-4 h-4"/></button>
                             </div>
                           </td>
@@ -2584,7 +3038,12 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                   {editingOrder.palletList?.find(p => p.id === editingPalletId)?.items.map(item => (
                     <div key={item.id} className="flex justify-between items-center border border-gray-200 p-2.5 rounded shadow-sm">
                       <div className="flex flex-col">
-                        <span className="text-[13px] text-gray-700 font-bold">L{item.lineNo}: {item.itemNumber}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[13px] text-gray-700 font-bold">L{item.lineNo}: {item.itemNumber}</span>
+                          {itemNotes.find(n => n.itemNumber === item.itemNumber) && (
+                            <span className="text-[10px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">⚠ {itemNotes.find(n => n.itemNumber === item.itemNumber)?.note}</span>
+                          )}
+                        </div>
                         <span className="text-[11px] text-gray-500">({item.boxes}b x {item.qtyPerBox}u = {item.boxes * item.qtyPerBox}p) - Added by <span className="font-bold text-orange-500">{item.addedBy || 'N/A'}</span></span>
                         {(() => {
                           const master = editingOrder.masterItems?.find(m => m.lineNo === item.lineNo);
@@ -2651,98 +3110,28 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                 <button onClick={() => handleSaveLineItem()} className="w-full py-2 bg-slate-100 border border-gray-300 rounded text-[13px] font-bold text-orange-500 hover:bg-white flex justify-center items-center gap-1.5 shadow-sm transition-colors"><Plus className="w-4 h-4"/> {editingLineItemId ? "Update Item" : "Add Item to Pallet"}</button>
               </div>
             </div>
-            {/* ── Add to Pending Tasks (inline form) ─────────────────── */}
-            <div className="border-t border-gray-200 mx-4 pt-3 mb-2">
-              {!showPalletTodoForm ? (
-                <button
-                  onClick={() => setShowPalletTodoForm(true)}
-                  className="w-full py-2 border border-dashed border-gray-300 rounded text-[13px] font-semibold text-gray-500 hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50 transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="w-4 h-4"/> Add to Pending Tasks
-                </button>
-              ) : (
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                  <p className="text-[11px] font-black uppercase text-gray-500 tracking-wide mb-2">New Pending Task</p>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-2">
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Lot #</label>
-                      <input type="text" value={palletTodoForm.lot_number}
-                        onChange={e => setPalletTodoForm(f => ({ ...f, lot_number: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                        placeholder="LOT-001"/>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Boxes</label>
-                      <input type="number" value={palletTodoForm.boxes}
-                        onChange={e => {
-                          const boxes = e.target.value;
-                          setPalletTodoForm(f => ({ ...f, boxes, total_pcs: f.total_manual ? f.total_pcs : String(Number(boxes) * Number(f.qty_per_box)) }));
-                        }}
-                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                        placeholder="0"/>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Qty / Box</label>
-                      <input type="number" value={palletTodoForm.qty_per_box}
-                        onChange={e => {
-                          const qpb = e.target.value;
-                          setPalletTodoForm(f => ({ ...f, qty_per_box: qpb, total_pcs: f.total_manual ? f.total_pcs : String(Number(f.boxes) * Number(qpb)) }));
-                        }}
-                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                        placeholder="0"/>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Total Pcs</label>
-                      <input type="number" value={palletTodoForm.total_pcs}
-                        onChange={e => setPalletTodoForm(f => ({ ...f, total_pcs: e.target.value, total_manual: true }))}
-                        onFocus={() => setPalletTodoForm(f => ({ ...f, total_manual: true }))}
-                        className="w-full border border-orange-300 rounded-md px-2 py-1.5 text-[13px] font-bold focus:outline-none focus:ring-1 focus:ring-orange-500 bg-orange-50 text-orange-800"
-                        placeholder="auto"/>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Original Bin</label>
-                      <input type="text" value={palletTodoForm.original_bin}
-                        onChange={e => setPalletTodoForm(f => ({ ...f, original_bin: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                        placeholder="A-12-3"/>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Action</label>
-                      <input type="text" value={palletTodoForm.action_required}
-                        onChange={e => setPalletTodoForm(f => ({ ...f, action_required: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-[13px] focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-white"
-                        placeholder="Move to staging"/>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={async () => {
-                        if (!palletTodoForm.lot_number.trim() || !palletTodoForm.original_bin.trim()) return;
-                        await supabase!.from('warehouse_todos').insert({
-                          lot_number: palletTodoForm.lot_number.trim(),
-                          boxes: Number(palletTodoForm.boxes) || 0,
-                          qty_per_box: Number(palletTodoForm.qty_per_box) || 0,
-                          total_pcs: Number(palletTodoForm.total_pcs) || 0,
-                          original_bin: palletTodoForm.original_bin.trim(),
-                          action_required: palletTodoForm.action_required.trim(),
-                        });
-                        setPalletTodoForm({ lot_number: '', boxes: '', qty_per_box: '', total_pcs: '', original_bin: '', action_required: '', total_manual: false });
-                        setShowPalletTodoForm(false);
-                      }}
-                      className="flex-1 py-1.5 bg-orange-600 text-white text-[13px] font-bold rounded-md hover:bg-orange-700 transition-colors"
-                    >
-                      Save Task
-                    </button>
-                    <button
-                      onClick={() => { setShowPalletTodoForm(false); setPalletTodoForm({ lot_number: '', boxes: '', qty_per_box: '', total_pcs: '', original_bin: '', action_required: '', total_manual: false }); }}
-                      className="px-3 py-1.5 border border-gray-300 text-[13px] font-medium text-gray-600 rounded-md hover:bg-gray-50 transition-colors"
-                    >
-                      Cancel
-                    </button>
+            {/* ── Item Notes for this pallet ─────────────────── */}
+            {(() => {
+              const currentPalletItems = editingOrder?.palletList?.find(p => p.id === editingPalletId)?.items || [];
+              const relevantNotes = itemNotes.filter(n => currentPalletItems.some(i => i.itemNumber === n.itemNumber));
+              if (relevantNotes.length === 0) return null;
+              return (
+                <div className="border-t border-amber-200 mx-4 pt-3 mb-2">
+                  <p className="text-[11px] font-black uppercase text-amber-600 tracking-wide mb-2">⚠ Item Notes</p>
+                  <div className="space-y-1.5">
+                    {relevantNotes.map(n => (
+                      <div key={n.id} className="bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-black text-slate-700">{n.itemNumber}</span>
+                          {n.lot && <span className="text-[10px] bg-amber-200 text-amber-800 font-bold px-1.5 py-0.5 rounded">{n.lot}</span>}
+                        </div>
+                        <p className="text-[12px] text-amber-800 mt-0.5">{n.note}</p>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )}
-            </div>
+              );
+            })()}
             <div className="p-4 flex justify-end">
               <button onClick={() => setEditingPalletId(null)} className="px-5 py-2 bg-orange-500 text-white font-bold rounded shadow-sm hover:bg-orange-600 text-sm">Done & Close</button>
             </div>
@@ -2851,6 +3240,17 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
                   <textarea rows={3} value={editingOrder.notes || ""} onChange={e => handleInputChange('notes', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400 resize-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Freight Terms</label>
+                  <select value={editingOrder.freight} onChange={e => handleInputChange('freight', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none appearance-none">
+                    <option value="Select Freight Terms" disabled>Select Freight Terms</option>
+                    <option value="Collect">Collect</option>
+                    <option value="Prepaid">Prepaid</option>
+                    <option value="PPD and Charge">PPD and Charge</option>
+                    <option value="CPT">CPT</option>
+                    <option value="FOB">FOB</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Assign Truck</label>
