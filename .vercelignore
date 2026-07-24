@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.vercel
+
+# Personal media parked in src — must never be uploaded to Vercel
+src/vecinos
+*.mp4
+*.MP4
+*.mov
+*.MOV

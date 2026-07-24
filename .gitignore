@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Environment files — never commit credentials
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -24,3 +29,10 @@ dist-ssr
 *.sw?
 
 .vercel
+
+# Personal media parked in the project — keep it local, never commit or deploy
+src/vecinos/
+*.mp4
+*.MP4
+*.mov
+*.MOV

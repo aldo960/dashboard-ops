@@ -43,7 +43,10 @@ const IS_PLACEHOLDER_CREDENTIALS = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 const supabase: SupabaseClient | null = IS_PLACEHOLDER_CREDENTIALS
   ? null
   : createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
-      auth: { persistSession: false }
+      // persistSession:false → la sesión vive solo en memoria: cualquier recarga o
+      // encendido de la PC vuelve a mostrar el login (pantalla de bloqueo).
+      // autoRefreshToken mantiene viva la sesión mientras la pestaña sigue abierta.
+      auth: { persistSession: false, autoRefreshToken: true }
     });
 
 // --- Constants ---
@@ -80,7 +83,65 @@ interface PartnerPallet {
   number: string;
   boxes: string;
   weight: string;
+  palletType: 'Hyundai' | 'Loom';
 }
+
+interface PalletSize {
+  id: string;
+  name: string;
+  widthIn: number;
+  lengthIn: number;
+}
+
+interface PlannerPallet {
+  id: string;
+  orderId: string;
+  palletNumber: number;
+  weight: number;
+  widthIn: number;
+  lengthIn: number;
+  isLoom: boolean;
+  sizeName?: string;
+}
+interface PlacedPlannerPallet extends PlannerPallet {
+  x: number;
+  y: number;
+}
+
+const DEFAULT_PALLET_SIZES = [
+  { name: 'Fake Hyundai', width_in: 32, length_in: 45 },
+  { name: 'Loom',         width_in: 44, length_in: 44 },
+  { name: 'Hyundai',      width_in: 32, length_in: 47 },
+  { name: 'Normal',       width_in: 36, length_in: 36 },
+  { name: 'Otra',         width_in: 38, length_in: 38 },
+];
+const DEFAULT_NORMAL_SIZE = DEFAULT_PALLET_SIZES[2]; // Hyundai
+const DEFAULT_LOOM_SIZE   = DEFAULT_PALLET_SIZES[1]; // Loom
+
+const PLANNER_TRAILER_PRESETS = [
+  { name: "53' Van Seca", length: 636, width: 99 },
+  { name: "48' Van Seca", length: 576, width: 99 },
+  { name: "Contenedor 40' High Cube", length: 473, width: 92 },
+  { name: "Contenedor 40' Estándar", length: 473, width: 92 },
+  { name: "Contenedor 20'", length: 232, width: 92 },
+];
+
+
+// Pallet type colors — used in the 2D trailer visualization
+const PALLET_TYPE_COLORS: Record<string, { bg: string; border: string; text: string; label: string }> = {
+  'Hyundai':      { bg: 'bg-blue-200',   border: 'border-blue-500',   text: 'text-blue-900',   label: 'Hyundai' },
+  'Fake Hyundai': { bg: 'bg-sky-200',    border: 'border-sky-500',    text: 'text-sky-900',    label: 'Fake Hyundai' },
+  'Loom':         { bg: 'bg-purple-200', border: 'border-purple-500', text: 'text-purple-900', label: 'Loom' },
+  'Normal':       { bg: 'bg-green-200',  border: 'border-green-500',  text: 'text-green-900',  label: 'Normal' },
+  'Otra':         { bg: 'bg-amber-200',  border: 'border-amber-500',  text: 'text-amber-900',  label: 'Otra' },
+};
+const PALLET_DEFAULT_COLOR = { bg: 'bg-gray-200', border: 'border-gray-400', text: 'text-gray-700', label: '—' };
+
+// Partner pallets get their own distinct color (orange)
+const PARTNER_PALLET_COLOR = { bg: 'bg-orange-100', border: 'border-orange-400', text: 'text-orange-800', label: 'Partner' };
+
+// These pallet types are always oriented horizontally (long side across trailer width)
+const HORIZONTAL_PALLET_TYPES = new Set(['Hyundai', 'Fake Hyundai']);
 
 interface PalletItem {
   id: string;
@@ -88,10 +149,14 @@ interface PalletItem {
   boxes: number;
   weight: string;
   items: PalletLineItem[];
+  sizeName?: string;
+  widthIn?: number;
+  lengthIn?: number;
 }
 
 interface Order {
-  id: string;
+  id: string;          // UUID interno — nunca cambia, nunca se muestra
+  orderNumber: string; // número visible y editable (antes era id)
   status: "Completed" | "In Progress" | "Delayed" | string;
   po: string;
   freight: string;
@@ -172,16 +237,54 @@ const isLoomPallet = (p: PalletItem) => {
   return p.items.some(i => i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox)));
 };
 
+// Map a DB row (with joined pallets/pallet_items/order_items) → Order interface.
+// Single source of truth so every fetch path stays consistent (dashboard, realtime, visibility refresh).
+const mapOrderFromDB = (data: any): Order => {
+  const { pallets: palletsArr, order_items: orderItemsArr, order_number, ...orderFields } = data;
+  return {
+    ...orderFields,
+    orderNumber: order_number || orderFields.id,
+    palletList: ((palletsArr || []) as any[])
+      .sort((a: any, b: any) => a.number - b.number)
+      .map((p: any) => ({
+        id: p.id,
+        number: p.number,
+        weight: p.weight || '0.00',
+        boxes: ((p.pallet_items || []) as any[]).reduce((s: number, i: any) => s + (Number(i.boxes) || 0), 0),
+        sizeName: p.size_name || undefined,
+        widthIn: p.width_in || undefined,
+        lengthIn: p.length_in || undefined,
+        items: ((p.pallet_items || []) as any[]).map((i: any) => ({
+          id: i.id,
+          lineNo: i.line_no || '',
+          itemNumber: i.item_number || '',
+          boxes: i.boxes || 0,
+          qtyPerBox: i.qty_per_box || 0,
+          addedBy: i.added_by || '',
+        })),
+      })),
+    masterItems: ((orderItemsArr || []) as any[])
+      .sort((a: any, b: any) => parseInt(a.line_no) - parseInt(b.line_no))
+      .map((m: any) => ({
+        id: m.id,
+        lineNo: m.line_no || '',
+        itemNumber: m.item_number || '',
+        orderedBoxes: m.ordered_boxes || 0,
+        orderedQty: m.ordered_qty || 0,
+      })),
+  };
+};
+
 // Mock Data Generator
 const getMockOrders = (): Order[] => {
   const todayStr = getTodayUSFormat();
   const futureStr = "12/25/2026";
   return [
-    { id: "ORD-1001", status: "Completed", po: "PO-001", freight: "Prepaid", pallets: 2, normalPallets: 2, loomPallets: 0, boxes: 10, weight: "1500.00", shipmentDate: todayStr, truckId: "Truck 1", palletList: [], masterItems: [], isManualOverride: true },
-    { id: "ORD-1002", status: "In Progress", po: "PO-002", freight: "Collect", pallets: 4, normalPallets: 3, loomPallets: 1, boxes: 25, weight: "3200.00", shipmentDate: todayStr, truckId: "Truck 1", palletList: [], masterItems: [], isManualOverride: true },
-    { id: "ORD-1003", status: "In Progress", po: "PO-003", freight: "CPT", pallets: 1, normalPallets: 1, loomPallets: 0, boxes: 5, weight: "800.00", shipmentDate: todayStr, truckId: "Unassigned", palletList: [], masterItems: [], isManualOverride: true },
-    { id: "ORD-1004", status: "Delayed", po: "URGENT-004", freight: "PPD and Charge", pallets: 5, normalPallets: 5, loomPallets: 0, boxes: 40, weight: "5000.00", shipmentDate: todayStr, truckId: "Truck 2", palletList: [], masterItems: [], isManualOverride: true },
-    { id: "ORD-1005", status: "In Progress", po: "PO-005", freight: "Prepaid", pallets: 8, normalPallets: 6, loomPallets: 2, boxes: 60, weight: "8500.00", shipmentDate: futureStr, truckId: "Truck 3", palletList: [], masterItems: [], isManualOverride: true }
+    { id: "ORD-1001", orderNumber: "ORD-1001", status: "Completed", po: "PO-001", freight: "Prepaid", pallets: 2, normalPallets: 2, loomPallets: 0, boxes: 10, weight: "1500.00", shipmentDate: todayStr, truckId: "Truck 1", palletList: [], masterItems: [], isManualOverride: true },
+    { id: "ORD-1002", orderNumber: "ORD-1002", status: "In Progress", po: "PO-002", freight: "Collect", pallets: 4, normalPallets: 3, loomPallets: 1, boxes: 25, weight: "3200.00", shipmentDate: todayStr, truckId: "Truck 1", palletList: [], masterItems: [], isManualOverride: true },
+    { id: "ORD-1003", orderNumber: "ORD-1003", status: "In Progress", po: "PO-003", freight: "CPT", pallets: 1, normalPallets: 1, loomPallets: 0, boxes: 5, weight: "800.00", shipmentDate: todayStr, truckId: "Unassigned", palletList: [], masterItems: [], isManualOverride: true },
+    { id: "ORD-1004", orderNumber: "ORD-1004", status: "Delayed", po: "URGENT-004", freight: "PPD and Charge", pallets: 5, normalPallets: 5, loomPallets: 0, boxes: 40, weight: "5000.00", shipmentDate: todayStr, truckId: "Truck 2", palletList: [], masterItems: [], isManualOverride: true },
+    { id: "ORD-1005", orderNumber: "ORD-1005", status: "In Progress", po: "PO-005", freight: "Prepaid", pallets: 8, normalPallets: 6, loomPallets: 2, boxes: 60, weight: "8500.00", shipmentDate: futureStr, truckId: "Truck 3", palletList: [], masterItems: [], isManualOverride: true }
   ];
 };
 
@@ -260,7 +363,7 @@ export default function App() {
   const [lineItemForm, setLineItemForm] = useState<PalletLineItem>({ id: "", lineNo: "", itemNumber: "", boxes: 0, qtyPerBox: 0 });
   const [editingLineItemId, setEditingLineItemId] = useState<string | null>(null);
   
-  const [newOrderForm, setNewOrderForm] = useState({ id: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
+  const [newOrderForm, setNewOrderForm] = useState({ orderNumber: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
 
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkTab, setBulkTab] = useState<'looms'|'standard'>('looms');
@@ -269,9 +372,18 @@ export default function App() {
   const [showRenumberForm, setShowRenumberForm] = useState<boolean>(false);
   const [renumberStartFrom, setRenumberStartFrom] = useState<number>(1);
   const [partnerPalletList, setPartnerPalletList] = useState<PartnerPallet[]>([]);
-  const [partnerPalletForm, setPartnerPalletForm] = useState({ number: '', boxes: '', weight: '' });
+  const [partnerPalletForm, setPartnerPalletForm] = useState<{ number: string; boxes: string; weight: string; palletType: 'Hyundai' | 'Loom' }>({ number: '', boxes: '', weight: '', palletType: 'Hyundai' });
   const [mergingPalletId, setMergingPalletId] = useState<string | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState<string>('');
+  const [palletSizes, setPalletSizes] = useState<PalletSize[]>([]);
+  const [showSizesModal, setShowSizesModal] = useState(false);
+  const [editingSizeId, setEditingSizeId] = useState<string | null>(null);
+  const [sizeForm, setSizeForm] = useState({ name: '', widthIn: '40', lengthIn: '48' });
+
+  const [planLoadTruckId, setPlanLoadTruckId] = useState<string | null>(null);
+  const [planLoadTrailerPreset, setPlanLoadTrailerPreset] = useState(0);
+  const planLoadTrailerLength = PLANNER_TRAILER_PRESETS[planLoadTrailerPreset]?.length ?? 636;
+  const planLoadTrailerWidth = PLANNER_TRAILER_PRESETS[planLoadTrailerPreset]?.width ?? 99;
 
   const [detailsTab, setDetailsTab] = useState<'general' | 'packing_list' | 'weight_sheet' | 'items' | 'order_check'>('general');
   const [expandedCheckLines, setExpandedCheckLines] = useState<Record<string, boolean>>({});
@@ -317,39 +429,6 @@ export default function App() {
     // No intentar cargar datos hasta que el usuario esté autenticado
     if (!currentUser) return;
 
-    // Helper: map DB row (with joined pallets/pallet_items/order_items) → Order interface
-    const mapOrderFromDB = (data: any): Order => {
-      const { pallets: palletsArr, order_items: orderItemsArr, ...orderFields } = data;
-      return {
-        ...orderFields,
-        palletList: ((palletsArr || []) as any[])
-          .sort((a: any, b: any) => a.number - b.number)
-          .map((p: any) => ({
-            id: p.id,
-            number: p.number,
-            weight: p.weight || '0.00',
-            boxes: ((p.pallet_items || []) as any[]).reduce((s: number, i: any) => s + (Number(i.boxes) || 0), 0),
-            items: ((p.pallet_items || []) as any[]).map((i: any) => ({
-              id: i.id,
-              lineNo: i.line_no || '',
-              itemNumber: i.item_number || '',
-              boxes: i.boxes || 0,
-              qtyPerBox: i.qty_per_box || 0,
-              addedBy: i.added_by || '',
-            })),
-          })),
-        masterItems: ((orderItemsArr || []) as any[])
-          .sort((a: any, b: any) => parseInt(a.line_no) - parseInt(b.line_no))
-          .map((m: any) => ({
-            id: m.id,
-            lineNo: m.line_no || '',
-            itemNumber: m.item_number || '',
-            orderedBoxes: m.ordered_boxes || 0,
-            orderedQty: m.ordered_qty || 0,
-          })),
-      };
-    };
-
     const fetchOrders = async () => {
       try {
         const { data, error } = await supabase!
@@ -357,19 +436,13 @@ export default function App() {
           .select('*, pallets(*, pallet_items(*)), order_items(*)');
         if (error) throw error;
 
-        if (data && data.length > 0) {
-          setOrders(data.map(mapOrderFromDB));
-          setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true }));
-        } else {
-          // BD vacía: cargar datos de ejemplo para demostración
-          setOrders(prev => (prev.length === 0 ? getMockOrders() : prev));
-          setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true, "12/25/2026": true }));
-          setExpandedTrucks(prev => ({ ...prev, [`${getTodayUSFormat()}-Truck 1`]: true }));
-        }
+        // Modo real: nunca cargar datos de demostración — una BD vacía se muestra vacía.
+        // (Los mocks solo aplican en modo demo sin credenciales, manejado arriba.)
+        setOrders((data || []).map(mapOrderFromDB));
+        setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true }));
       } catch (err) {
+        // Error transitorio: conservar lo ya cargado en pantalla, no sustituir con mocks
         console.error("Error al obtener datos de Supabase:", err);
-        setOrders(prev => (prev.length === 0 ? getMockOrders() : prev));
-        setExpandedDates(prev => ({ ...prev, [getTodayUSFormat()]: true, "12/25/2026": true }));
       }
     };
 
@@ -416,6 +489,20 @@ export default function App() {
     };
     fetchItemNotes();
 
+    const fetchPalletSizes = async () => {
+      const { data } = await supabase!.from('pallet_sizes').select('*').order('name');
+      if (data) {
+        if (data.length === 0) {
+          // Seed default sizes on first load
+          const { data: seeded } = await supabase!.from('pallet_sizes').insert(DEFAULT_PALLET_SIZES).select();
+          if (seeded) setPalletSizes(seeded.map((s: any) => ({ id: s.id, name: s.name, widthIn: s.width_in, lengthIn: s.length_in })));
+        } else {
+          setPalletSizes(data.map((s: any) => ({ id: s.id, name: s.name, widthIn: s.width_in, lengthIn: s.length_in })));
+        }
+      }
+    };
+    fetchPalletSizes();
+
     // Suscripción a cambios en tiempo real en las 3 tablas
     const channel = supabase!
       .channel('public:all-tables')
@@ -445,10 +532,18 @@ export default function App() {
           if (data) setItemNotes(data.map((n: any) => ({ id: n.id, itemNumber: n.item_number, lot: n.lot || '', note: n.note, active: n.active })));
         });
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'pallet_sizes' }, () => {
+        supabase!.from('pallet_sizes').select('*').order('name').then(({ data }) => {
+          if (data) setPalletSizes(data.map((s: any) => ({ id: s.id, name: s.name, widthIn: s.width_in, lengthIn: s.length_in })));
+        });
+      })
       .subscribe();
 
     return () => {
       supabase!.removeChannel(channel);
+      // Cancela refetches pendientes para que no disparen consultas tras logout/unmount
+      Object.values(refetchTimersRef.current).forEach(clearTimeout);
+      refetchTimersRef.current = {};
     };
   }, [currentUser]);
 
@@ -458,18 +553,7 @@ export default function App() {
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         supabase.from('orders').select('*, pallets(*, pallet_items(*)), order_items(*)').then(({ data }) => {
-          if (data) setOrders(data.map((d: any) => {
-            const { pallets: palletsArr, order_items: orderItemsArr, ...orderFields } = d;
-            return {
-              ...orderFields,
-              palletList: ((palletsArr || []) as any[]).sort((a: any,b: any) => a.number - b.number).map((p: any) => ({
-                id: p.id, number: p.number, weight: p.weight || '0.00',
-                boxes: ((p.pallet_items || []) as any[]).reduce((s: number, i: any) => s + (Number(i.boxes)||0), 0),
-                items: ((p.pallet_items || []) as any[]).map((i: any) => ({ id: i.id, lineNo: i.line_no||'', itemNumber: i.item_number||'', boxes: i.boxes||0, qtyPerBox: i.qty_per_box||0, addedBy: i.added_by||'' })),
-              })),
-              masterItems: ((orderItemsArr || []) as any[]).sort((a: any,b: any) => parseInt(a.line_no)-parseInt(b.line_no)).map((m: any) => ({ id: m.id, lineNo: m.line_no||'', itemNumber: m.item_number||'', orderedBoxes: m.ordered_boxes||0, orderedQty: m.ordered_qty||0 })),
-            };
-          }));
+          if (data) setOrders(data.map(mapOrderFromDB));
         });
       }
     };
@@ -479,11 +563,43 @@ export default function App() {
     return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval); };
   }, [currentUser]);
 
+// Auto-assign default sizes (Hyundai / Loom) to pallets from this week that have none
+  useEffect(() => {
+    if (!currentUser || !supabase || palletSizes.length === 0 || orders.length === 0) return;
+    const hyundaiSize = palletSizes.find(s => s.name === 'Hyundai') || { name: DEFAULT_NORMAL_SIZE.name, widthIn: DEFAULT_NORMAL_SIZE.width_in, lengthIn: DEFAULT_NORMAL_SIZE.length_in };
+    const loomSize    = palletSizes.find(s => s.name === 'Loom')    || { name: DEFAULT_LOOM_SIZE.name,   widthIn: DEFAULT_LOOM_SIZE.width_in,   lengthIn: DEFAULT_LOOM_SIZE.length_in };
+    const today = new Date();
+    const startOfWeek = new Date(today); startOfWeek.setDate(today.getDate() - ((today.getDay() + 6) % 7)); startOfWeek.setHours(0,0,0,0); // Monday (works on Sundays too)
+    const endOfWeek   = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 6); endOfWeek.setHours(23,59,59,999); // Sunday
+    const isThisWeek = (dateStr: string) => { const d = new Date(dateStr); return d >= startOfWeek && d <= endOfWeek; };
+    const palletsToUpdate: { id: string; name: string; widthIn: number; lengthIn: number }[] = [];
+    const updatedOrders = orders.map(o => {
+      if (!o.shipmentDate || !isThisWeek(o.shipmentDate)) return o;
+      const newList = (o.palletList || []).map(p => {
+        if (p.sizeName) return p;
+        const size = isLoomPallet(p) ? loomSize : hyundaiSize;
+        palletsToUpdate.push({ id: p.id, name: size.name, widthIn: size.widthIn, lengthIn: size.lengthIn });
+        return { ...p, sizeName: size.name, widthIn: size.widthIn, lengthIn: size.lengthIn };
+      });
+      return { ...o, palletList: newList };
+    });
+    if (palletsToUpdate.length === 0) return;
+    setOrders(updatedOrders);
+    isSavingRef.current = true; savingCountRef.current++;
+    Promise.all(palletsToUpdate.map(p =>
+      supabase!.from('pallets').update({ size_name: p.name, width_in: p.widthIn, length_in: p.lengthIn }).eq('id', p.id)
+    )).then(() => {
+      savingCountRef.current = Math.max(0, savingCountRef.current - 1);
+      if (savingCountRef.current === 0) isSavingRef.current = false;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, palletSizes.length > 0, orders.length > 0]);
+
 const saveOrderToCloud = async (order: Order) => {
     if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
-    // Strip normalized fields — they live in pallets/pallet_items/order_items tables now
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { palletList, masterItems, ...orderFields } = order;
+    const { palletList, masterItems, orderNumber, ...rest } = order;
+    const orderFields = { ...rest, order_number: orderNumber };
     savingCountRef.current++;
     isSavingRef.current = true;
     try {
@@ -514,7 +630,7 @@ const saveOrderToCloud = async (order: Order) => {
     const searchLower = searchTerm.toLowerCase();
     // 1. Filter by search
     const filtered = orders.filter(o =>
-      (o.id || '').toLowerCase().includes(searchLower) ||
+      (o.orderNumber || '').toLowerCase().includes(searchLower) ||
       (o.po || '').toLowerCase().includes(searchLower) ||
       (o.masterItems || []).some(m => (m.itemNumber || '').toLowerCase().includes(searchLower))
     );
@@ -596,8 +712,6 @@ const saveOrderToCloud = async (order: Order) => {
   // --- Auto-Save Effect (Updates UI locally instantly, debounces cloud save) ---
   useEffect(() => {
     if (!editingOrder) return;
-    // If ID changed in Quick Edit, skip auto-save — explicit Save button handles it
-    if (isQuickEditOpen && editingOrder.id !== _activeOrderContext?.orderId) return;
 
     let finalOrder = { ...editingOrder };
     let updatedTotals = false;
@@ -644,8 +758,8 @@ const saveOrderToCloud = async (order: Order) => {
         pallets: editingOrder.pallets, 
         normalPallets: editingOrder.normalPallets || editingOrder.pallets, 
         loomPallets: editingOrder.loomPallets || 0,
-        boxes: editingOrder.boxes, 
-        weight: parseFloat(editingOrder.weight || "0") 
+        boxes: editingOrder.boxes,
+        weight: parseFloat(String(editingOrder.weight || "0").replace(/,/g, '')) || 0
       };
     }
     const list = editingOrder.palletList || [];
@@ -736,6 +850,209 @@ const saveOrderToCloud = async (order: Order) => {
     return { trucks, grandTrucks, grandLoomPlts, grandNormalPlts, grandBoxes, grandWeight };
   }, [reportDateData]);
 
+  const plannerResult = useMemo(() => {
+    if (!planLoadTruckId) return null;
+    const truck = truckReportSummary.trucks.find(t => t.id === planLoadTruckId);
+    if (!truck) return null;
+
+    // Build groups (for legend/colors) and flat pallet list for layout.
+    // Use palletList from truck.ordersData directly (it already has the spread of the full order).
+    // Fallback to orders state in case ordersData doesn't carry palletList (e.g. manual override orders).
+    const groups: { orderId: string; pallets: PlannerPallet[] }[] = [];
+    const allPallets: PlannerPallet[] = [];
+    for (const o of truck.ordersData) {
+      const palletSource = (o as any).palletList?.length > 0
+        ? (o as any).palletList
+        : (orders.find(ord => ord.id === o.id)?.palletList || []);
+      const pallets: PlannerPallet[] = (palletSource as any[]).map((p: any) => {
+        const loom = isLoomPallet(p);
+        const effectiveSizeName: string = p.sizeName || (loom ? 'Loom' : 'Hyundai');
+        // Look up correct default dims from the size table — never assume Hyundai dims for other types
+        const sizeRecord = DEFAULT_PALLET_SIZES.find(s => s.name === effectiveSizeName);
+        const rawW = p.widthIn || sizeRecord?.width_in || 32;
+        const rawL = p.lengthIn || sizeRecord?.length_in || 47;
+        // Hyundai and Fake Hyundai always go in landscape (long side across trailer width)
+        const forceH = HORIZONTAL_PALLET_TYPES.has(effectiveSizeName);
+        return {
+          id: p.id,
+          orderId: o.id,
+          palletNumber: p.number,
+          weight: parseFloat(String(p.weight || '0').replace(/,/g, '')) || 0,
+          widthIn: forceH ? Math.max(rawW, rawL) : rawW,
+          lengthIn: forceH ? Math.min(rawW, rawL) : rawL,
+          isLoom: loom,
+          sizeName: effectiveSizeName,
+        };
+      });
+      if (pallets.length > 0) { groups.push({ orderId: o.id, pallets }); allPallets.push(...pallets); }
+    }
+
+    // Partner pallets — shared from the weight sheet (same truck, different company)
+    if (partnerPalletList.length > 0) {
+      const partnerAsPallets: PlannerPallet[] = partnerPalletList.map((pp, i) => {
+        const isPartnerLoom = pp.palletType === 'Loom';
+        return {
+          id: `partner-${pp.id}`,
+          orderId: 'partner',
+          palletNumber: Number(pp.number) || (900 + i),
+          weight: parseFloat((pp.weight || '0').replace(/,/g, '')) || 0,
+          widthIn: isPartnerLoom ? 44 : 47,
+          lengthIn: isPartnerLoom ? 44 : 32,
+          isLoom: isPartnerLoom,
+          sizeName: isPartnerLoom ? 'Loom' : 'Partner',
+        };
+      });
+      groups.push({ orderId: 'partner', pallets: partnerAsPallets });
+      allPallets.push(...partnerAsPallets);
+    }
+
+    const EMPTY = { placed: [] as PlacedPlannerPallet[], groups, dotSteer: 10500, dotDrive: 14000, dotTrailer: 10000, gvw: 34500, totalPayload: 0, usedLength: 0, correctionMessage: null as string | null, feasible: true, kingpinY: 0, axleY: 0 };
+    if (allPallets.length === 0) return EMPTY;
+
+    // DOT geometry (mirrors standalone planner)
+    const KINGPIN_Y = 36;
+    const MIN_KP_TO_AXLE = 480;
+    let trailerAxleY = planLoadTrailerLength - 120;
+    trailerAxleY = Math.max(KINGPIN_Y + MIN_KP_TO_AXLE, trailerAxleY);
+    trailerAxleY = Math.min(trailerAxleY, planLoadTrailerLength);
+    const axleDist = trailerAxleY - KINGPIN_Y;
+    const ES = 10500, ED = 14000, ET = 10000;
+
+    const calcDOT = (payload: number, cgYSum: number) => {
+      let s = ES, d = ED, t = ET;
+      if (payload > 0) {
+        const pct = Math.max(0, Math.min(1, (cgYSum / payload - KINGPIN_Y) / axleDist));
+        t += payload * pct; const kp = payload * (1 - pct);
+        s += kp * 0.15; d += kp * 0.85;
+      }
+      return { steer: Math.round(s), drive: Math.round(d), trailer: Math.round(t), gvw: Math.round(s + d + t) };
+    };
+
+    type RowBias = 'interleaved' | 'rear' | 'front' | 'maxDensity';
+
+    const tryLayout = (cargo: PlannerPallet[], startY = 0, bias: RowBias = 'interleaved') => {
+      const n = cargo.length;
+      const avail = planLoadTrailerLength - startY;
+      const avgLen = cargo.reduce((s, p) => s + p.lengthIn, 0) / n || 48;
+      const maxRows = Math.floor(avail / avgLen);
+
+      let rowSizes: number[];
+      if (bias === 'maxDensity') {
+        rowSizes = [...Array(Math.floor(n / 2)).fill(2), ...Array(n % 2).fill(1)];
+      } else if (n <= maxRows) {
+        rowSizes = Array(n).fill(1);
+      } else {
+        let r2 = Math.max(0, n - maxRows); let r1 = n - 2 * r2;
+        if (r1 < 0) { r2 = Math.floor(n / 2); r1 = n % 2; }
+        if (bias === 'rear')  rowSizes = [...Array(r1).fill(1), ...Array(r2).fill(2)];
+        else if (bias === 'front') rowSizes = [...Array(r2).fill(2), ...Array(r1).fill(1)];
+        else {
+          rowSizes = []; let singles = r1;
+          for (let i = 0; i < r2; i++) {
+            rowSizes.push(2);
+            if (i < r2 - 1 && singles > 0) {
+              const gaps = r2 - 1 - i; const put = Math.ceil(singles / gaps);
+              for (let j = 0; j < put; j++) rowSizes.push(1); singles -= put;
+            }
+          }
+          while (singles-- > 0) rowSizes.push(1);
+        }
+      }
+
+      const placed: PlacedPlannerPallet[] = [];
+      const rem = [...cargo];
+      let curY = startY, cg = 0, load = 0, pi = 0, err: string | null = null;
+      while (rem.length > 0) {
+        const rowSize = pi < rowSizes.length ? rowSizes[pi] : 2;
+        const p1 = rem[0];
+        // Only pair pallets of the same type to avoid wasted gap between different sizes
+        let willPair = rowSize > 1 && rem.length > 1
+          && p1.widthIn + rem[1].widthIn <= planLoadTrailerWidth
+          && rem[1].sizeName === p1.sizeName;
+        const rowLen = willPair ? Math.max(p1.lengthIn, rem[1].lengthIn) : p1.lengthIn;
+        if (curY + rowLen > planLoadTrailerLength) { err = 'overflow'; break; }
+        const a1 = rem.shift()!;
+        if (willPair) {
+          const a2 = rem.shift()!;
+          placed.push({ ...a1, x: 0, y: curY });
+          placed.push({ ...a2, x: planLoadTrailerWidth - a2.widthIn, y: curY });
+          cg += a1.weight * (curY + a1.lengthIn / 2) + a2.weight * (curY + a2.lengthIn / 2);
+          load += a1.weight + a2.weight;
+        } else {
+          placed.push({ ...a1, x: Math.round((planLoadTrailerWidth - a1.widthIn) / 2), y: curY });
+          cg += a1.weight * (curY + a1.lengthIn / 2);
+          load += a1.weight;
+        }
+        curY += rowLen; pi++;
+      }
+      return { placed, cgYSum: cg, totalPayload: load, usedLength: curY, err };
+    };
+
+    // Feasible CG range for given payload
+    const computeRange = (payload: number) => {
+      if (payload <= 0) return { pMin: 0, pMax: 1, feasible: true };
+      const pMin = Math.max(0, 1 - (12000 - ES) / (0.15 * payload), 1 - (34000 - ED) / (0.85 * payload));
+      const pMax = Math.min(1, (34000 - ET) / payload);
+      return { pMin, pMax, feasible: pMin <= pMax };
+    };
+
+    const applyBest = (cargo: PlannerPallet[], pMin: number, pMax: number) => {
+      const cgMin = KINGPIN_Y + pMin * axleDist;
+      const cgMax = KINGPIN_Y + pMax * axleDist;
+      const base = tryLayout(cargo, 0, 'interleaved');
+      if (base.err) return { layout: base, shift: 0, bias: 'interleaved' as RowBias };
+      const baseCG = base.totalPayload > 0 ? base.cgYSum / base.totalPayload : cgMin;
+      if (baseCG >= cgMin && baseCG <= cgMax) return { layout: base, shift: 0, bias: 'interleaved' as RowBias };
+      const needsUp = baseCG < cgMin;
+      const bias: RowBias = needsUp ? 'rear' : 'front';
+      const rebiased = tryLayout(cargo, 0, bias);
+      const best = rebiased.err ? base : rebiased;
+      if (!needsUp) return { layout: best, shift: 0, bias };
+      const bestCG = best.totalPayload > 0 ? best.cgYSum / best.totalPayload : cgMin;
+      if (bestCG >= cgMin) return { layout: best, shift: 0, bias };
+      const slack = Math.max(0, planLoadTrailerLength - best.usedLength);
+      const shift = Math.min(cgMin - bestCG, slack);
+      if (shift <= 0.5) return { layout: best, shift: 0, bias };
+      const shifted = tryLayout(cargo, shift, bias);
+      return shifted.err ? { layout: best, shift: 0, bias } : { layout: shifted, shift, bias };
+    };
+
+    // --- Main flow ---
+    // Strategy: "Anchor + Looms + Tail"
+    //   1. 1 pair of the 2 HEAVIEST non-Loom pallets at the NOSE (anchor weight for drive axles)
+    //   2. All Looms in the middle (lighter, distributed)
+    //   3. Remaining non-Loom toward the rear (lighter → heavier going back)
+    const loomGroup    = allPallets.filter(p => p.isLoom);
+    const nonLoomGroup = allPallets.filter(p => !p.isLoom);
+
+    const nonLoomByWeight = [...nonLoomGroup].sort((a, b) => b.weight - a.weight);
+    const anchorPair = nonLoomByWeight.slice(0, 2);         // 2 heaviest → nose anchor
+    const tailNonLoom = [...nonLoomByWeight.slice(2)]       // rest, lighter first toward rear
+      .sort((a, b) => a.weight - b.weight);
+    const sortedLooms = [...loomGroup].sort((a, b) => a.weight - b.weight);
+
+    // Final order: [heavy anchor] + [looms] + [tail Hyundai lighter→heavier]
+    let currentCargo = [...anchorPair, ...sortedLooms, ...tailNonLoom];
+
+    let { layout, shift, bias } = applyBest(currentCargo, 0, 1);
+    const { pMin, pMax, feasible } = computeRange(layout.totalPayload);
+    let correctionMessage: string | null = null;
+
+    if (!feasible) {
+      correctionMessage = `Con ${Math.round(layout.totalPayload).toLocaleString()} lbs de carga no existe acomodo que cumpla los 3 ejes. Hay que bajar el peso total.`;
+    } else {
+      const best0 = applyBest(currentCargo, pMin, pMax);
+      layout = best0.layout; shift = best0.shift; bias = best0.bias;
+      const msgs: string[] = [];
+      if (shift > 0.5) msgs.push(`${Math.round(shift)}" libres en nose`);
+      else if (bias !== 'interleaved') msgs.push('filas ajustadas para ejes');
+      correctionMessage = msgs.length > 0 ? `DOT Safe: ${msgs.join(' · ')}.` : null;
+    }
+
+    const dot = calcDOT(layout.totalPayload, layout.cgYSum);
+    return { placed: layout.placed, groups, dotSteer: dot.steer, dotDrive: dot.drive, dotTrailer: dot.trailer, gvw: dot.gvw, totalPayload: layout.totalPayload, usedLength: layout.usedLength, correctionMessage, feasible, kingpinY: KINGPIN_Y, axleY: trailerAxleY };
+  }, [planLoadTruckId, planLoadTrailerLength, planLoadTrailerWidth, truckReportSummary, orders, partnerPalletList]);
+
   // --- UI Functions and Actions ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -759,49 +1076,48 @@ const saveOrderToCloud = async (order: Order) => {
 
   const handleCreateOrder = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newOrderForm.id || !newOrderForm.shipmentDate) return;
+    if (!newOrderForm.orderNumber || !newOrderForm.shipmentDate) return;
     const formatted = formatFromInput(newOrderForm.shipmentDate);
     const assignedTruck = newOrderForm.truckId === "N/A" ? "Unassigned" : newOrderForm.truckId;
-    const newOrder: Order = { 
-      ...newOrderForm, id: newOrderForm.id, shipmentDate: formatted, status: "In Progress", 
+    const newOrder: Order = {
+      ...newOrderForm,
+      id: crypto.randomUUID(),
+      shipmentDate: formatted, status: "In Progress",
       pallets: 0, normalPallets: 0, loomPallets: 0, boxes: 0, weight: "0.00", truckId: assignedTruck, palletList: [], masterItems: [], isManualOverride: false
     };
-    
-    // Check for duplicate ID
-    const isDuplicate = orders.some(o => o.id === newOrder.id);
+
+    // Check for duplicate order number (not id — id is always a fresh UUID)
+    const isDuplicate = orders.some(o => o.orderNumber === newOrder.orderNumber);
     if (isDuplicate) {
-      // Suggest a BO suffix
       let suffix = '-BO'; let counter = 2;
-      while (orders.some(o => o.id === newOrder.id + suffix)) { suffix = `-BO${counter}`; counter++; }
-      const suggestedId = newOrder.id + suffix;
+      while (orders.some(o => o.orderNumber === newOrder.orderNumber + suffix)) { suffix = `-BO${counter}`; counter++; }
+      const suggestedNum = newOrder.orderNumber + suffix;
       setConfirmDialog({
         isOpen: true,
         title: "Orden ya existe",
-        message: `La orden "${newOrder.id}" ya existe. Para un back order, se sugiere el ID: "${suggestedId}". ¿Deseas crearla con ese ID?`,
+        message: `La orden "${newOrder.orderNumber}" ya existe. Para un back order, se sugiere el número: "${suggestedNum}". ¿Deseas crearla con ese número?`,
         onConfirm: () => {
-          const boOrder = { ...newOrder, id: suggestedId };
+          const boOrder = { ...newOrder, id: crypto.randomUUID(), orderNumber: suggestedNum };
           setOrders(prev => [...prev, boOrder]);
           saveOrderToCloud(boOrder);
           setEditingOrder(boOrder);
           setActiveOrderContext({ orderId: boOrder.id });
           setDetailsTab('general');
           setActiveTab("Order Details");
-          setNewOrderForm({ id: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
+          setNewOrderForm({ orderNumber: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
           setConfirmDialog(null);
         }
       });
       return;
     }
 
-    // Quick local update
     setOrders(prev => [...prev, newOrder]);
     saveOrderToCloud(newOrder);
-    
     setEditingOrder(newOrder);
     setActiveOrderContext({ orderId: newOrder.id });
     setDetailsTab('general');
     setActiveTab("Order Details");
-    setNewOrderForm({ id: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
+    setNewOrderForm({ orderNumber: "", po: "", shipmentDate: "", freight: "Select Freight Terms", truckId: "N/A", notes: "" });
   };
 
   const executeDeleteOrder = async (context: EditContext) => {
@@ -837,19 +1153,9 @@ const saveOrderToCloud = async (order: Order) => {
 
   const handleQuickEditSave = async () => {
     if (!editingOrder) return;
-    const originalId = _activeOrderContext?.orderId ?? '';
-    const newId = editingOrder.id.trim();
-    if (newId && newId !== originalId) {
-      // ID changed: remove old, insert new
-      setOrders(prev => prev.filter(o => o.id !== originalId).concat({ ...editingOrder, id: newId }));
-      if (originalId) await deleteOrderFromCloud(originalId);
-      await saveOrderToCloud({ ...editingOrder, id: newId });
-      setActiveOrderContext({ orderId: newId });
-    } else {
-      // Always do explicit save so no changes are lost when closing
-      setOrders(prev => prev.map(o => o.id === editingOrder.id ? editingOrder : o));
-      await saveOrderToCloud(editingOrder);
-    }
+    // id (UUID) never changes — only orderNumber and other fields update
+    setOrders(prev => prev.map(o => o.id === editingOrder.id ? editingOrder : o));
+    await saveOrderToCloud(editingOrder);
     closeAndNavigateSummary();
   };
 
@@ -1020,7 +1326,9 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
     setEditingOrder({ ...editingOrder, palletList: renumbered });
     setShowRenumberForm(false);
     if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
       await Promise.all(renumbered.map(p => supabase!.from('pallets').update({ number: p.number }).eq('id', p.id)));
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
     }
   };
 
@@ -1031,23 +1339,62 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
     if (!source || !target) return;
     const mergedItems = [...(target.items || []), ...(source.items || [])];
     const mergedBoxes = (Number(target.boxes) || 0) + (Number(source.boxes) || 0);
-    const updatedList = editingOrder.palletList.map(p => {
-      if (p.id === mergeTargetId) return { ...p, items: mergedItems, boxes: mergedBoxes };
-      if (p.id === mergingPalletId) return { ...p, items: [], boxes: 0 };
-      return p;
-    });
+    // Move items into target, drop the now-empty source pallet, and renumber the rest
+    const updatedList = editingOrder.palletList
+      .map(p => (p.id === mergeTargetId ? { ...p, items: mergedItems, boxes: mergedBoxes } : p))
+      .filter(p => p.id !== mergingPalletId)
+      .map((p, index) => ({ ...p, number: index + 1 }));
     setEditingOrder({ ...editingOrder, palletList: updatedList });
     setMergingPalletId(null);
     setMergeTargetId('');
     if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
       isSavingRef.current = true;
       savingCountRef.current++;
+      // Reassign the source's items to the target BEFORE deleting the source pallet
+      // (CASCADE would otherwise delete them along with the source).
       await Promise.all((source.items || []).map(item =>
         supabase!.from('pallet_items').update({ pallet_id: mergeTargetId }).eq('id', item.id)
       ));
       await supabase!.from('pallets').update({ boxes: mergedBoxes }).eq('id', mergeTargetId);
-      await supabase!.from('pallets').update({ boxes: 0 }).eq('id', mergingPalletId);
+      await supabase!.from('pallets').delete().eq('id', mergingPalletId);
+      await Promise.all(updatedList.map(p => supabase!.from('pallets').update({ number: p.number }).eq('id', p.id)));
       setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
+  };
+
+  const handleSavePalletSize = async () => {
+    if (!sizeForm.name.trim() || !sizeForm.widthIn || !sizeForm.lengthIn) return;
+    const payload = { name: sizeForm.name.trim(), width_in: Number(sizeForm.widthIn), length_in: Number(sizeForm.lengthIn) };
+    if (editingSizeId) {
+      setPalletSizes(prev => prev.map(s => s.id === editingSizeId ? { id: s.id, name: payload.name, widthIn: payload.width_in, lengthIn: payload.length_in } : s));
+      if (!IS_PLACEHOLDER_CREDENTIALS && supabase) await supabase.from('pallet_sizes').update(payload).eq('id', editingSizeId);
+      setEditingSizeId(null);
+    } else {
+      const tempId = `ps_${Date.now()}`;
+      setPalletSizes(prev => [...prev, { id: tempId, name: payload.name, widthIn: payload.width_in, lengthIn: payload.length_in }]);
+      if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+        const { data } = await supabase.from('pallet_sizes').insert(payload).select().single();
+        if (data) setPalletSizes(prev => prev.map(s => s.id === tempId ? { id: data.id, name: data.name, widthIn: data.width_in, lengthIn: data.length_in } : s));
+      }
+    }
+    setSizeForm({ name: '', widthIn: '40', lengthIn: '48' });
+  };
+
+  const handleDeletePalletSize = async (id: string) => {
+    setPalletSizes(prev => prev.filter(s => s.id !== id));
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) await supabase.from('pallet_sizes').delete().eq('id', id);
+  };
+
+  const handleSelectPalletSize = async (palletId: string, sizeId: string) => {
+    if (!editingOrder) return;
+    const size = palletSizes.find(s => s.id === sizeId);
+    if (!size) return;
+    setEditingOrder(prev => {
+      if (!prev) return prev;
+      return { ...prev, palletList: prev.palletList?.map(p => p.id === palletId ? { ...p, sizeName: size.name, widthIn: size.widthIn, lengthIn: size.lengthIn } : p) };
+    });
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      await supabase.from('pallets').update({ size_name: size.name, width_in: size.widthIn, length_in: size.lengthIn }).eq('id', palletId);
     }
   };
 
@@ -1287,14 +1634,14 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
               )}
             </div>
             <button
-              onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.id); }}
+              onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.orderNumber); }}
               title="Copiar"
               className="p-0.5 text-gray-400 hover:text-orange-400 transition-colors opacity-40 group-hover:opacity-100 shrink-0"
             ><Copy className="w-3 h-3"/></button>
           </div>
 
-          {/* Order ID — full width, never truncates */}
-          <h3 className="text-gray-900 font-black text-[17px] leading-tight group-hover:text-orange-600 transition-colors mb-2 break-all">{order.id}</h3>
+          {/* Order number */}
+          <h3 className="text-gray-900 font-black text-[17px] leading-tight group-hover:text-orange-600 transition-colors mb-2 break-all">{order.orderNumber}</h3>
 
           {/* PO + Truck */}
           <div className={`pt-2 border-t text-[12px] text-gray-500 space-y-0.5 ${divider}`}>
@@ -1440,7 +1787,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
         {/* LABELS */}
         {(printMode === 'labels_all' && editingOrder?.palletList) && editingOrder.palletList.map(p => (
           <div key={p.id} className="label-page flex flex-col justify-center items-center text-center border-b border-gray-300 print:border-none" style={{ width: '4in', height: '2in', padding: '0.2in', boxSizing: 'border-box', fontFamily: 'sans-serif' }}>
-            <h1 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Order: {editingOrder.id}</h1>
+            <h1 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Order: {editingOrder.orderNumber}</h1>
             <p style={{ margin: '0 0 8px 0', fontSize: '16px' }}>PO: {editingOrder.po || 'N/A'}</p>
             <h2 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Pallet {p.number} {isLoomPallet(p) ? '(Loom)' : ''}</h2>
             <p style={{ margin: '0', fontSize: '14px' }}>Ship Date: {editingOrder.shipmentDate}</p>
@@ -1448,7 +1795,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
         ))}
         {(printMode === 'label_single' && printTargetPallet) && (
           <div className="label-page flex flex-col justify-center items-center text-center border-b border-gray-300 print:border-none" style={{ width: '4in', height: '2in', padding: '0.2in', boxSizing: 'border-box', fontFamily: 'sans-serif' }}>
-            <h1 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Order: {editingOrder?.id}</h1>
+            <h1 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Order: {editingOrder?.orderNumber}</h1>
             <p style={{ margin: '0 0 8px 0', fontSize: '16px' }}>PO: {editingOrder?.po || 'N/A'}</p>
             <h2 style={{ margin: '0 0 5px 0', fontSize: '26px', fontWeight: '900' }}>Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h2>
             <p style={{ margin: '0', fontSize: '14px' }}>Ship Date: {editingOrder?.shipmentDate}</p>
@@ -1460,7 +1807,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
           <div key={pallet.id} className="sheet-page p-8 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
             <h1 className="text-center text-base font-bold mb-4">Pallet {pallet.number} {isLoomPallet(pallet) ? '(Loom)' : ''}</h1>
             <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto">
-              <p><b>Order #:</b> {editingOrder.id}</p>
+              <p><b>Order #:</b> {editingOrder.orderNumber}</p>
               <p><b>PO:</b> {editingOrder.po}</p>
               <p><b>Ship Date:</b> {editingOrder.shipmentDate}</p>
               <p><b>Weight:</b> {pallet.weight} lbs</p>
@@ -1480,7 +1827,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
         {(printMode === 'pallet_sheet_single' && printTargetPallet) && (
           <div className="sheet-page p-8 font-sans mx-auto max-w-[8.5in] border-b border-gray-300 print:border-none">
             <h1 className="text-center text-base font-bold mb-4">Pallet {printTargetPallet.number} {isLoomPallet(printTargetPallet) ? '(Loom)' : ''}</h1>
-            <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto"><p><b>Order #:</b> {editingOrder?.id}</p><p><b>PO:</b> {editingOrder?.po}</p><p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p><p><b>Weight:</b> {printTargetPallet.weight} lbs</p></div>
+            <div className="border border-gray-300 px-4 py-3 rounded mb-5 bg-gray-50 text-center text-xs grid grid-cols-2 gap-x-6 gap-y-1 max-w-sm mx-auto"><p><b>Order #:</b> {editingOrder?.orderNumber}</p><p><b>PO:</b> {editingOrder?.po}</p><p><b>Ship Date:</b> {editingOrder?.shipmentDate}</p><p><b>Weight:</b> {printTargetPallet.weight} lbs</p></div>
             <h3 className="text-xs font-bold mb-2 uppercase tracking-wide text-gray-600">Items on Pallet</h3>
             <table className="w-full text-left border-collapse text-xs">
               <thead><tr className="bg-gray-100"><th className="px-2 py-1.5 border-b-2 border-gray-300">LINE</th><th className="px-2 py-1.5 border-b-2 border-gray-300">ITEM #</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">BOXES / PLT</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-center">QTY/BOX</th><th className="px-2 py-1.5 border-b-2 border-gray-300 text-right">TOTAL PCS</th></tr></thead>
@@ -1500,7 +1847,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             <style>{'@media print { @page { margin: 0.4in; size: letter portrait; } body { margin: 0; } }'}</style>
             <h1 className="text-center text-sm font-bold mb-2 text-[#2c3e50]">Distribution List</h1>
             <div className="mb-3 text-xs">
-              <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po} | <b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
+              <p><b>Order #:</b> {editingOrder?.orderNumber} | <b>PO:</b> {editingOrder?.po} | <b>Ship Date:</b> {editingOrder?.shipmentDate}</p>
               <p><b>Total Boxes for Order:</b> {totals.boxes.toLocaleString()}</p>
             </div>
             <table className="w-full text-left border-collapse text-xs">
@@ -1570,7 +1917,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             <style>{'@media print { @page { margin: 0.4in; size: letter portrait; } body { margin: 0; } }'}</style>
             <h1 className="text-center text-base font-bold mb-2">Weight Sheet</h1>
             <div className="mb-3 text-xs">
-              <p><b>Order #:</b> {editingOrder?.id} | <b>PO:</b> {editingOrder?.po}</p>
+              <p><b>Order #:</b> {editingOrder?.orderNumber} | <b>PO:</b> {editingOrder?.po}</p>
               <p><b>Ship Date:</b> {editingOrder?.shipmentDate} &nbsp;|&nbsp; <b>Total Boxes:</b> {totals.boxes.toLocaleString()}</p>
               {(() => {
                 const myPallets = editingOrder?.palletList?.length || 0;
@@ -1712,7 +2059,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                   <tbody>
                     {t.ordersData.map(o => (
                       <tr key={o.id} className="border-b border-gray-100">
-                        <td className="px-2 py-1.5">{o.id}</td><td className="px-2 py-1.5">{o.po}</td><td className="px-2 py-1.5">{o.freight}</td>
+                        <td className="px-2 py-1.5">{o.orderNumber}</td><td className="px-2 py-1.5">{o.po}</td><td className="px-2 py-1.5">{o.freight}</td>
                         <td className="px-2 py-1.5 text-center font-bold">{o.loomPlts}</td><td className="px-2 py-1.5 text-center">{o.normalPlts}</td>
                         <td className="px-2 py-1.5 text-center">{Number(o.finalBoxes||0).toLocaleString()}</td><td className="px-2 py-1.5 text-right">{Number(o.finalWeight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                       </tr>
@@ -2071,7 +2418,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Order ID <span className="text-red-500">*</span></label>
-                  <input required value={newOrderForm.id} onChange={e => setNewOrderForm({...newOrderForm, id: e.target.value})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm focus:ring-orange-400 outline-none" placeholder="e.g., ORD12345" />
+                  <input required value={newOrderForm.orderNumber} onChange={e => setNewOrderForm({...newOrderForm, orderNumber: e.target.value})} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm focus:ring-orange-400 outline-none" placeholder="e.g., ORD12345" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">PO Reference</label>
@@ -2136,7 +2483,16 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                  <div className="space-y-6">
                     {truckReportSummary.trucks.map(t => (
                        <div key={t.id} className="border border-gray-200 rounded-md overflow-hidden">
-                          <h3 className="bg-gray-100 text-gray-800 font-bold p-3 border-b flex items-center gap-2"><TruckIcon className="w-5 h-5"/> Truck: {t.id}</h3>
+                          <h3 className="bg-gray-100 text-gray-800 font-bold p-3 border-b flex items-center gap-2">
+                            <TruckIcon className="w-5 h-5"/> Truck: {t.id}
+                            <button
+                              onClick={() => setPlanLoadTruckId(t.id)}
+                              className="ml-auto flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                              Plan Load
+                            </button>
+                          </h3>
                           <table className="w-full text-sm text-left">
                              <thead className="bg-gray-50 text-gray-500 text-xs border-b">
                                 <tr><th className="p-3">Order #</th><th className="p-3">PO #</th><th className="p-3">Freight</th><th className="p-3 text-center">Loom Plts</th><th className="p-3 text-center">Normal Plts</th><th className="p-3 text-center">Total Boxes</th><th className="p-3 text-right">Weight (lbs)</th></tr>
@@ -2144,7 +2500,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                              <tbody>
                                 {t.ordersData.map(o => (
                                    <tr key={o.id} className="border-b border-gray-100">
-                                      <td className="p-3">{o.id}</td><td className="p-3">{o.po}</td><td className="p-3">{o.freight}</td>
+                                      <td className="p-3">{o.orderNumber}</td><td className="p-3">{o.po}</td><td className="p-3">{o.freight}</td>
                                       <td className="p-3 text-center font-bold text-gray-800">{o.loomPlts}</td><td className="p-3 text-center">{o.normalPlts}</td>
                                       <td className="p-3 text-center">{Number(o.finalBoxes||0).toLocaleString()}</td><td className="p-3 text-right">{Number(o.finalWeight||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                                    </tr>
@@ -2303,8 +2659,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-5">
                       <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">Order Number</label>
-                        {/* ID es la llave primaria — solo lectura para evitar crear duplicados en Supabase */}
-                        <input value={editingOrder.id} readOnly className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm font-bold text-slate-600 cursor-not-allowed" />
+                        <input value={editingOrder.orderNumber} onChange={e => handleInputChange('orderNumber', e.target.value)} className="w-full bg-slate-100 border border-gray-200 rounded-md p-2.5 text-sm font-bold text-slate-600 outline-none focus:border-orange-400" />
                       </div>
                       <div>
                         <label className="block text-sm font-bold text-gray-700 mb-1.5">PO (Purchase Order)</label>
@@ -2541,7 +2896,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                   <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-4">
                      <div>
                        <h2 className="text-2xl font-bold text-orange-500 mb-2">Distribution List</h2>
-                       <p className="text-sm text-gray-600">Order: {editingOrder.id} | PO: {editingOrder.po} | Total Boxes: {totals.boxes}</p>
+                       <p className="text-sm text-gray-600">Order: {editingOrder.orderNumber} | PO: {editingOrder.po} | Total Boxes: {totals.boxes}</p>
                      </div>
                      <button onClick={() => triggerPrint('packing_list')} className="px-4 py-2 bg-orange-500 text-white rounded-md font-bold flex gap-2"><Printer className="w-4 h-4"/> Print Distribution List</button>
                   </div>
@@ -2606,7 +2961,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                      <div>
                        <h2 className="text-2xl font-bold text-orange-500 mb-2">Weight Sheet</h2>
                        <div className="text-sm text-gray-600 font-medium space-y-0.5">
-                         <p>Order #: {editingOrder.id}</p>
+                         <p>Order #: {editingOrder.orderNumber}</p>
                          <p>PO: {editingOrder.po}</p>
                          <p>Ship Date: {editingOrder.shipmentDate}</p>
                          <p>Total Boxes: <b>{Number(totals.boxes||0).toLocaleString()}</b></p>
@@ -2704,18 +3059,29 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
                               if (!partnerPalletForm.number.trim()) return;
-                              setPartnerPalletList(prev => [...prev, { id: Date.now().toString(), ...partnerPalletForm }]);
-                              setPartnerPalletForm({ number: '', boxes: '', weight: '' });
+                              setPartnerPalletList(prev => [...prev, { id: crypto.randomUUID(), ...partnerPalletForm }]);
+                              setPartnerPalletForm({ number: '', boxes: '', weight: '', palletType: 'Hyundai' });
                             }
                           }}
                           className="w-28 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-orange-400"
                         />
                       </div>
+                      <div>
+                        <label className="block text-[11px] text-gray-500 mb-1">Type</label>
+                        <select
+                          value={partnerPalletForm.palletType}
+                          onChange={e => setPartnerPalletForm(f => ({...f, palletType: e.target.value as 'Hyundai' | 'Loom'}))}
+                          className="border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-orange-400"
+                        >
+                          <option value="Hyundai">Hyundai</option>
+                          <option value="Loom">Loom</option>
+                        </select>
+                      </div>
                       <button
                         onClick={() => {
                           if (!partnerPalletForm.number.trim()) return;
-                          setPartnerPalletList(prev => [...prev, { id: Date.now().toString(), ...partnerPalletForm }]);
-                          setPartnerPalletForm({ number: '', boxes: '', weight: '' });
+                          setPartnerPalletList(prev => [...prev, { id: crypto.randomUUID(), ...partnerPalletForm }]);
+                          setPartnerPalletForm({ number: '', boxes: '', weight: '', palletType: 'Hyundai' });
                         }}
                         className="px-3 py-1.5 bg-orange-500 text-white text-sm rounded font-bold hover:bg-orange-600"
                       >Add Pallet</button>
@@ -2734,6 +3100,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                             <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
                               <tr>
                                 <th className="p-2 border-b border-gray-200">Pallet #</th>
+                                <th className="p-2 border-b border-gray-200">Type</th>
                                 <th className="p-2 border-b border-gray-200 text-center">Boxes</th>
                                 <th className="p-2 border-b border-gray-200 text-right">Weight (lbs)</th>
                                 <th className="p-2 border-b border-gray-200 w-8"></th>
@@ -2743,6 +3110,11 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                               {partnerPalletList.map(pp => (
                                 <tr key={pp.id} className="border-b border-gray-100 hover:bg-gray-50">
                                   <td className="p-2 font-medium">Pallet {pp.number}</td>
+                                  <td className="p-2 text-xs">
+                                    <span className={`px-1.5 py-0.5 rounded font-medium ${pp.palletType === 'Loom' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                                      {pp.palletType || 'Hyundai'}
+                                    </span>
+                                  </td>
                                   <td className="p-2 text-center">{Number(pp.boxes||0).toLocaleString()}</td>
                                   <td className="p-2 text-right">{pp.weight || '—'}</td>
                                   <td className="p-2 text-center">
@@ -2778,7 +3150,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             {detailsTab === 'items' && (
                <div className="bg-white border border-gray-200 rounded-md p-8 shadow-sm animate-in fade-in max-w-3xl">
                   <div className="flex items-center gap-3 mb-6">
-                    <h2 className="text-xl font-bold text-gray-800">Item Verification (Order {editingOrder.id})</h2>
+                    <h2 className="text-xl font-bold text-gray-800">Item Verification (Order {editingOrder.orderNumber})</h2>
                     {(() => {
                       const count = (editingOrder.masterItems || []).filter(m => itemNotes.find(n => n.itemNumber === m.itemNumber)).length;
                       return count > 0 ? (
@@ -3032,6 +3404,35 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             </div>
             
             <div className="p-5 overflow-y-auto flex-1">
+              {/* Pallet Size Selector */}
+              {(() => {
+                const currentPallet = editingOrder.palletList?.find(p => p.id === editingPalletId);
+                const selectedSizeId = palletSizes.find(s => s.name === currentPallet?.sizeName)?.id || '';
+                return (
+                  <div className="mb-5 bg-orange-50 border border-orange-200 rounded-lg p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="text-[12px] font-bold text-gray-700 uppercase tracking-wide">Pallet Size</label>
+                      <button onClick={() => setShowSizesModal(true)} className="text-[11px] text-orange-500 hover:text-orange-700 font-medium hover:underline">Manage Sizes</button>
+                    </div>
+                    <select
+                      value={selectedSizeId}
+                      onChange={e => e.target.value && handleSelectPalletSize(editingPalletId!, e.target.value)}
+                      className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400 bg-white"
+                    >
+                      <option value="">— Select a size —</option>
+                      {palletSizes.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} · {s.widthIn}"W × {s.lengthIn}"L</option>
+                      ))}
+                    </select>
+                    {currentPallet?.sizeName && (
+                      <p className="text-[11px] text-orange-600 font-medium mt-1.5">
+                        ✓ {currentPallet.sizeName} — {currentPallet.widthIn}" wide × {currentPallet.lengthIn}" long
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="mb-4">
                 <label className="block text-[13px] font-bold text-gray-700 mb-1.5">Items on Pallet</label>
                 <div className="bg-white border border-gray-300 rounded p-2 max-h-48 overflow-y-auto space-y-2">
@@ -3139,6 +3540,335 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
         </div>
       )}
 
+      {/* --- TRUCK LOAD PLANNER MODAL --- */}
+      {planLoadTruckId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
+          <div className="absolute inset-0 bg-slate-900/70" onClick={() => setPlanLoadTruckId(null)} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '92vh' }}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 flex-shrink-0">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Plan Load — {planLoadTruckId}</h2>
+                <p className="text-xs text-gray-400 mt-0.5">{PLANNER_TRAILER_PRESETS[planLoadTrailerPreset]?.name} · {planLoadTrailerWidth}" wide × {planLoadTrailerLength}" long</p>
+              </div>
+              <button onClick={() => setPlanLoadTruckId(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none ml-4">&times;</button>
+            </div>
+
+            {/* Body */}
+            <div className="flex flex-1 overflow-hidden">
+              {/* Left panel */}
+              <div className="w-60 flex-shrink-0 border-r border-gray-200 p-4 overflow-y-auto flex flex-col gap-4">
+                {/* Trailer selector */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Trailer</label>
+                  <select
+                    value={planLoadTrailerPreset}
+                    onChange={e => setPlanLoadTrailerPreset(Number(e.target.value))}
+                    className="w-full text-xs border border-gray-300 rounded-md px-2 py-1.5 bg-white"
+                  >
+                    {PLANNER_TRAILER_PRESETS.map((pr, i) => (
+                      <option key={i} value={i}>{pr.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* DOT Gauges */}
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Pesos DOT estimados</h4>
+                  {plannerResult && (() => {
+                    const axles = [
+                      { label: 'Eje delantero', val: plannerResult.dotSteer, limit: 12000, warn: 11000 },
+                      { label: 'Eje trasero (tractor)', val: plannerResult.dotDrive, limit: 34000, warn: 32000 },
+                      { label: 'Eje remolque', val: plannerResult.dotTrailer, limit: 34000, warn: 32000 },
+                      { label: 'GVW Total', val: plannerResult.gvw, limit: 80000, warn: 77000 },
+                    ];
+                    return (
+                      <div className="space-y-3">
+                        {axles.map(a => {
+                          const pct = Math.min(100, (a.val / a.limit) * 100);
+                          const over = a.val > a.limit;
+                          const nearLimit = a.val > a.warn;
+                          const barColor = over ? 'bg-red-500' : nearLimit ? 'bg-amber-400' : 'bg-green-500';
+                          return (
+                            <div key={a.label}>
+                              <div className="flex justify-between text-xs mb-0.5">
+                                <span className="text-gray-500 truncate max-w-[100px]">{a.label}</span>
+                                <span className={`font-bold ${over ? 'text-red-600' : nearLimit ? 'text-amber-600' : 'text-gray-800'}`}>{a.val.toLocaleString()}</span>
+                              </div>
+                              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+                              </div>
+                              <div className="text-right text-[10px] text-gray-400">límite {a.limit.toLocaleString()}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Order legend */}
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Órdenes</h4>
+                  <div className="space-y-1">
+                    {(plannerResult?.groups || []).map(g => {
+                      const totalW = g.pallets.reduce((s, p) => s + p.weight, 0);
+                      return (
+                        <div key={g.orderId} className="flex items-center gap-2 p-1.5 rounded border bg-gray-50 border-gray-200">
+                          <span className="text-xs font-bold text-gray-700">{g.orderId}</span>
+                          <span className="text-[10px] ml-auto text-gray-500">{g.pallets.length} plt · {totalW > 0 ? Math.round(totalW).toLocaleString() + ' lbs' : '—'}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Pallet type legend */}
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Tipos de pallet</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(PALLET_TYPE_COLORS).map(([name, c]) => (
+                      <span key={name} className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${c.bg} ${c.border} ${c.text}`}>
+                        {name}
+                      </span>
+                    ))}
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${PALLET_DEFAULT_COLOR.bg} ${PALLET_DEFAULT_COLOR.border} ${PALLET_DEFAULT_COLOR.text}`}>
+                      Sin tipo
+                    </span>
+                    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${PARTNER_PALLET_COLOR.bg} ${PARTNER_PALLET_COLOR.border} ${PARTNER_PALLET_COLOR.text}`}>
+                      Partner
+                    </span>
+                  </div>
+                </div>
+
+                {/* Summary */}
+                {plannerResult && (
+                  <div className="text-xs text-gray-500 border-t pt-3 space-y-1">
+                    <div>Payload: <b className="text-gray-800">{plannerResult.totalPayload > 0 ? Math.round(plannerResult.totalPayload).toLocaleString() + ' lbs' : '—'}</b></div>
+                    <div>Pallets ubicados: <b className="text-gray-800">{plannerResult.placed.length}</b></div>
+                    <div>Longitud usada: <b className="text-gray-800">{Math.round(plannerResult.usedLength)}"</b> / {planLoadTrailerLength}"</div>
+                  </div>
+                )}
+
+                {/* DOT correction / warning messages */}
+                {plannerResult?.correctionMessage && plannerResult.feasible && (
+                  <div className="mt-3 p-2 rounded-md bg-green-50 border border-green-300 text-green-800 text-[10px] leading-snug">
+                    ✓ {plannerResult.correctionMessage}
+                  </div>
+                )}
+                {plannerResult && !plannerResult.feasible && (
+                  <div className="mt-3 p-2 rounded-md bg-red-50 border border-red-300 text-red-800 text-[10px] leading-snug font-semibold">
+                    ⚠ {plannerResult.correctionMessage}
+                  </div>
+                )}
+                {plannerResult && plannerResult.feasible && (() => {
+                  const over = plannerResult.gvw > 80000 ? `GVW excede 80,000 lbs por ${(plannerResult.gvw - 80000).toLocaleString()} lbs`
+                    : plannerResult.dotSteer > 12000 ? `Eje delantero excede 12,000 lbs por ${(plannerResult.dotSteer - 12000).toLocaleString()} lbs`
+                    : plannerResult.dotDrive > 34000 ? `Eje trasero (tractor) excede 34,000 lbs por ${(plannerResult.dotDrive - 34000).toLocaleString()} lbs`
+                    : plannerResult.dotTrailer > 34000 ? `Eje remolque excede 34,000 lbs por ${(plannerResult.dotTrailer - 34000).toLocaleString()} lbs`
+                    : null;
+                  return over ? (
+                    <div className="mt-3 p-2 rounded-md bg-red-50 border border-red-400 text-red-800 text-[10px] leading-snug font-semibold">
+                      ⚠ {over}
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+
+              {/* Right panel: 2D visualization */}
+              <div className="flex-1 overflow-auto p-4 flex flex-col items-center justify-start bg-gray-50">
+                {plannerResult && (() => {
+                  const VIZ_H = 520;
+                  const scale = VIZ_H / planLoadTrailerLength;
+                  const vizW = Math.round(planLoadTrailerWidth * scale);
+                  const cgY = plannerResult.totalPayload > 0
+                    ? plannerResult.placed.reduce((s, p) => s + p.weight * (p.y + p.lengthIn / 2), 0) / plannerResult.totalPayload
+                    : null;
+                  const kpPx   = Math.round(plannerResult.kingpinY * scale);
+                  const axlePx = Math.round(plannerResult.axleY * scale);
+                  return (
+                    <div className="flex flex-col items-center gap-1">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">NOSE / KINGPIN</span>
+                      <div
+                        className="relative border-2 border-gray-400 rounded-sm bg-white shadow-inner"
+                        style={{ width: vizW, height: VIZ_H, minWidth: vizW }}
+                      >
+                        {/* Kingpin marker */}
+                        <div className="absolute left-0 right-0 z-20 pointer-events-none flex items-center" style={{ top: kpPx }}>
+                          <div className="flex-1 border-t border-dashed border-gray-400" />
+                          <span className="text-[7px] text-gray-400 px-0.5 bg-white leading-none">KP</span>
+                          <div className="flex-1 border-t border-dashed border-gray-400" />
+                        </div>
+                        {/* Rear axle marker */}
+                        <div className="absolute left-0 right-0 z-20 pointer-events-none flex items-center" style={{ top: axlePx }}>
+                          <div className="flex-1 border-t-2 border-dashed border-gray-500" />
+                          <span className="text-[7px] text-gray-500 px-0.5 bg-white leading-none font-bold">EJE</span>
+                          <div className="flex-1 border-t-2 border-dashed border-gray-500" />
+                        </div>
+                        {/* CG dashed line */}
+                        {cgY !== null && (
+                          <div
+                            className="absolute left-0 right-0 border-t-2 border-dashed border-blue-500 z-10 pointer-events-none"
+                            style={{ top: Math.round(cgY * scale) }}
+                          />
+                        )}
+                        {/* Pallets */}
+                        {plannerResult.placed.map(p => {
+                          const isPartner = p.orderId === 'partner';
+                          // Partner Looms use Loom color; partner Hyundai use orange
+                          const c = isPartner
+                            ? (p.isLoom ? PALLET_TYPE_COLORS['Loom'] : PARTNER_PALLET_COLOR)
+                            : (PALLET_TYPE_COLORS[p.sizeName || '']
+                                ?? (p.isLoom ? PALLET_TYPE_COLORS['Loom'] : PALLET_TYPE_COLORS['Hyundai'])
+                                ?? PALLET_DEFAULT_COLOR);
+                          const px = Math.round(p.x * scale);
+                          const py = Math.round(p.y * scale);
+                          // Clamp width so pallets never draw outside the trailer border
+                          const pw = Math.max(2, Math.min(Math.round(p.widthIn * scale), vizW - px));
+                          const ph = Math.max(2, Math.round(p.lengthIn * scale));
+                          const label = isPartner ? `P${p.palletNumber}` : `#${p.palletNumber}`;
+                          return (
+                            <div
+                              key={p.id}
+                              className={`absolute border flex flex-col items-center justify-center overflow-hidden cursor-default select-none ${c.bg} ${c.border}`}
+                              style={{ left: px, top: py, width: pw, height: ph }}
+                              title={`${isPartner ? 'Partner' : p.orderId} · Pallet ${isPartner ? 'P' : '#'}${p.palletNumber} · ${p.sizeName || '?'} · ${p.widthIn}"×${p.lengthIn}" · ${p.weight > 0 ? Math.round(p.weight).toLocaleString() + ' lbs' : '—'}`}
+                            >
+                              <span className={`font-bold leading-none text-center ${c.text}`} style={{ fontSize: Math.min(9, ph * 0.32) }}>
+                                {label}
+                              </span>
+                              {ph > 14 && p.weight > 0 && (
+                                <span className={`leading-none ${c.text} opacity-70`} style={{ fontSize: Math.min(7, ph * 0.22) }}>
+                                  {Math.round(p.weight / 100) / 10}k
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {/* End-of-load line */}
+                        {plannerResult.usedLength > 0 && plannerResult.usedLength < planLoadTrailerLength && (
+                          <div
+                            className="absolute left-0 right-0 border-t-2 border-red-400 z-10 pointer-events-none"
+                            style={{ top: Math.round(plannerResult.usedLength * scale) }}
+                          />
+                        )}
+                      </div>
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">DOORS</span>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-400 mt-1 justify-center">
+                        <span className="flex items-center gap-1"><span className="inline-block w-4 border-t border-dashed border-gray-400" /> Kingpin</span>
+                        <span className="flex items-center gap-1"><span className="inline-block w-4 border-t-2 border-dashed border-gray-500" /> Eje trasero</span>
+                        <span className="flex items-center gap-1"><span className="inline-block w-4 border-t-2 border-dashed border-blue-500" /> CG de carga</span>
+                        <span className="flex items-center gap-1"><span className="inline-block w-4 border-t-2 border-red-400" /> Fin de pallets</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {!plannerResult && (
+                  <div className="text-sm text-gray-400 mt-20 text-center">
+                    <p className="font-semibold">No se encontró data para este truck.</p>
+                    <p className="mt-1 text-xs">Asegúrate de tener una fecha activa en el Truck Report.</p>
+                  </div>
+                )}
+                {plannerResult && plannerResult.placed.length === 0 && (
+                  <div className="text-sm text-gray-400 mt-20 text-center">
+                    <p>Este truck no tiene pallets registrados.</p>
+                    <p className="mt-1 text-xs">Agrega pallets en la hoja de peso de cada orden.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- PALLET SIZES MODAL --- */}
+      {showSizesModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60" onClick={() => { setShowSizesModal(false); setEditingSizeId(null); setSizeForm({ name: '', widthIn: '40', lengthIn: '48' }); }} />
+          <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
+            <div className="p-4 flex justify-between items-center border-b border-gray-200">
+              <h3 className="text-lg font-bold text-gray-800">Pallet Sizes</h3>
+              <button onClick={() => { setShowSizesModal(false); setEditingSizeId(null); setSizeForm({ name: '', widthIn: '40', lengthIn: '48' }); }}><X className="w-5 h-5 text-gray-500 hover:text-gray-800"/></button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1">
+              {/* Add / Edit form */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4">
+                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">{editingSizeId ? 'Edit Size' : 'Add New Size'}</p>
+                <input
+                  type="text"
+                  value={sizeForm.name}
+                  onChange={e => setSizeForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Name (e.g. Standard 40×48)"
+                  className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400 mb-2"
+                />
+                <div className="flex gap-2 mb-3">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Width (in)</label>
+                    <input
+                      type="number"
+                      value={sizeForm.widthIn}
+                      onChange={e => setSizeForm(f => ({ ...f, widthIn: e.target.value }))}
+                      className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
+                      placeholder="40"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Length (in)</label>
+                    <input
+                      type="number"
+                      value={sizeForm.lengthIn}
+                      onChange={e => setSizeForm(f => ({ ...f, lengthIn: e.target.value }))}
+                      className="w-full border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400"
+                      placeholder="48"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSavePalletSize}
+                    className="flex-1 bg-orange-500 text-white text-sm font-bold py-2 rounded hover:bg-orange-600"
+                  >{editingSizeId ? 'Save Changes' : 'Add Size'}</button>
+                  {editingSizeId && (
+                    <button
+                      onClick={() => { setEditingSizeId(null); setSizeForm({ name: '', widthIn: '40', lengthIn: '48' }); }}
+                      className="px-3 py-2 border border-gray-300 rounded text-sm text-gray-500 hover:bg-gray-50"
+                    >Cancel</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Saved sizes list */}
+              <div className="space-y-2">
+                {palletSizes.length === 0 && (
+                  <p className="text-center text-gray-400 text-sm py-6">No sizes yet. Add one above.</p>
+                )}
+                {palletSizes.map(s => (
+                  <div key={s.id} className={`flex items-center justify-between border rounded-lg px-3 py-2.5 transition-colors ${editingSizeId === s.id ? 'border-orange-300 bg-orange-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
+                    <div>
+                      <p className="text-sm font-bold text-gray-800">{s.name}</p>
+                      <p className="text-[11px] text-gray-500">{s.widthIn}" wide × {s.lengthIn}" long</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setEditingSizeId(s.id); setSizeForm({ name: s.name, widthIn: String(s.widthIn), lengthIn: String(s.lengthIn) }); }}
+                        className="text-gray-400 hover:text-orange-500 p-1"
+                        title="Edit"
+                      ><Pencil className="w-4 h-4"/></button>
+                      <button
+                        onClick={() => handleDeletePalletSize(s.id)}
+                        className="text-gray-300 hover:text-red-500 p-1"
+                        title="Delete"
+                      ><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- ADD BULK MODAL --- */}
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -3224,14 +3954,13 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             <div className="absolute inset-0 bg-slate-900/60" onClick={closeAndNavigateSummary} />
             <div className="relative bg-slate-100 rounded-md w-full max-w-md shadow-2xl flex flex-col max-h-[90vh]">
               <div className="p-5 border-b border-gray-200 bg-white rounded-t-md flex justify-between items-center">
-                 <h3 className="text-lg font-bold text-gray-800">Quick Edit: {editingOrder.id}</h3>
+                 <h3 className="text-lg font-bold text-gray-800">Quick Edit: {editingOrder.orderNumber}</h3>
                  <button onClick={closeAndNavigateSummary} className="text-gray-500 hover:text-gray-800"><X className="w-5 h-5"/></button>
               </div>
               <div className="p-6 space-y-4 overflow-y-auto flex-1">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Order #</label>
-                  <input value={editingOrder.id} onChange={e => handleInputChange('id', e.target.value)} className={`w-full bg-white border rounded p-2 text-sm outline-none focus:border-orange-400 font-bold ${editingOrder.id !== _activeOrderContext?.orderId ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
-                  {editingOrder.id !== _activeOrderContext?.orderId && <p className="text-[11px] text-amber-600 mt-1">Order # changed — click Save to apply.</p>}
+                  <input value={editingOrder.orderNumber} onChange={e => handleInputChange('orderNumber', e.target.value)} className="w-full bg-white border border-gray-300 rounded p-2 text-sm outline-none focus:border-orange-400 font-bold" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Shipment Date <span className="text-red-500">*</span></label>
