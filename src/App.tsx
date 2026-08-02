@@ -78,6 +78,18 @@ interface ItemNote {
   active: boolean;
 }
 
+// Cajas sin pallet propio — van "mix" montadas en un pallet de otra orden,
+// pero pertenecen (y cuentan) a esta orden.
+interface LooseItem {
+  id: string;
+  lineNo: string;
+  itemNumber: string;
+  boxes: number;
+  qtyPerBox: number;
+  mixNote?: string;
+  addedBy?: string;
+}
+
 interface PartnerPallet {
   id: string;
   number: string;
@@ -169,8 +181,9 @@ interface Order {
   looseBoxes?: number;
   shipmentDate?: string;
   truckId?: string;
-  palletList?: PalletItem[]; 
+  palletList?: PalletItem[];
   masterItems?: MasterItem[];
+  looseItems?: LooseItem[];
   isManualOverride?: boolean;
 }
 
@@ -237,13 +250,27 @@ const isLoomPallet = (p: PalletItem) => {
   return p.items.some(i => i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox)));
 };
 
+const getLooseBoxesTotal = (o: Order) =>
+  (o.looseItems || []).reduce((s, li) => s + (Number(li.boxes) || 0), 0);
+
 // Map a DB row (with joined pallets/pallet_items/order_items) → Order interface.
 // Single source of truth so every fetch path stays consistent (dashboard, realtime, visibility refresh).
 const mapOrderFromDB = (data: any): Order => {
-  const { pallets: palletsArr, order_items: orderItemsArr, order_number, ...orderFields } = data;
+  const { pallets: palletsArr, order_items: orderItemsArr, loose_items: looseArr, order_number, ...orderFields } = data;
   return {
     ...orderFields,
     orderNumber: order_number || orderFields.id,
+    looseItems: ((looseArr || []) as any[])
+      .sort((a: any, b: any) => parseInt(a.line_no) - parseInt(b.line_no))
+      .map((li: any) => ({
+        id: li.id,
+        lineNo: li.line_no || '',
+        itemNumber: li.item_number || '',
+        boxes: li.boxes || 0,
+        qtyPerBox: li.qty_per_box || 0,
+        mixNote: li.mix_note || '',
+        addedBy: li.added_by || '',
+      })),
     palletList: ((palletsArr || []) as any[])
       .sort((a: any, b: any) => a.number - b.number)
       .map((p: any) => ({
@@ -375,6 +402,7 @@ export default function App() {
   const [partnerPalletForm, setPartnerPalletForm] = useState<{ number: string; boxes: string; weight: string; palletType: 'Hyundai' | 'Loom' }>({ number: '', boxes: '', weight: '', palletType: 'Hyundai' });
   const [mergingPalletId, setMergingPalletId] = useState<string | null>(null);
   const [mergeTargetId, setMergeTargetId] = useState<string>('');
+  const [looseItemForm, setLooseItemForm] = useState({ lineNo: '', itemNumber: '', boxes: '', qtyPerBox: '', mixNote: '' });
   const [palletSizes, setPalletSizes] = useState<PalletSize[]>([]);
   const [showSizesModal, setShowSizesModal] = useState(false);
   const [editingSizeId, setEditingSizeId] = useState<string | null>(null);
@@ -433,7 +461,7 @@ export default function App() {
       try {
         const { data, error } = await supabase!
           .from('orders')
-          .select('*, pallets(*, pallet_items(*)), order_items(*)');
+          .select('*, pallets(*, pallet_items(*)), order_items(*), loose_items(*)');
         if (error) throw error;
 
         // Modo real: nunca cargar datos de demostración — una BD vacía se muestra vacía.
@@ -452,7 +480,7 @@ export default function App() {
       try {
         const { data } = await supabase
           .from('orders')
-          .select('*, pallets(*, pallet_items(*)), order_items(*)')
+          .select('*, pallets(*, pallet_items(*)), order_items(*), loose_items(*)')
           .eq('id', orderId)
           .single();
         if (data) {
@@ -524,6 +552,10 @@ export default function App() {
         const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
         if (orderId) debouncedRefetch(orderId);
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'loose_items' }, (payload) => {
+        const orderId = (payload.new as any)?.order_id || (payload.old as any)?.order_id;
+        if (orderId) debouncedRefetch(orderId);
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_todos' }, () => {
         fetchTodos();
       })
@@ -552,7 +584,7 @@ export default function App() {
     if (!currentUser || !supabase) return;
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
-        supabase.from('orders').select('*, pallets(*, pallet_items(*)), order_items(*)').then(({ data }) => {
+        supabase.from('orders').select('*, pallets(*, pallet_items(*)), order_items(*), loose_items(*)').then(({ data }) => {
           if (data) setOrders(data.map(mapOrderFromDB));
         });
       }
@@ -598,7 +630,7 @@ export default function App() {
 const saveOrderToCloud = async (order: Order) => {
     if (IS_PLACEHOLDER_CREDENTIALS || !supabase) return;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { palletList, masterItems, orderNumber, ...rest } = order;
+    const { palletList, masterItems, looseItems, orderNumber, ...rest } = order;
     const orderFields = { ...rest, order_number: orderNumber };
     savingCountRef.current++;
     isSavingRef.current = true;
@@ -684,7 +716,7 @@ const saveOrderToCloud = async (order: Order) => {
           }, 0),
           boxes: ords.reduce((s, o) => {
             if (o.isManualOverride) return s + (Number(o.boxes) || 0);
-            return s + (o.palletList?.reduce((bs, p) => bs + (Number(p.boxes) || 0), 0) || 0) + (Number(o.looseBoxes) || 0);
+            return s + (o.palletList?.reduce((bs, p) => bs + (Number(p.boxes) || 0), 0) || 0) + (Number(o.looseBoxes) || 0) + getLooseBoxesTotal(o);
           }, 0),
           weight: ords.reduce((s, o) => {
             if (o.isManualOverride) return s + parseFloat(String(o.weight || "0").replace(/,/g, '') || "0");
@@ -721,7 +753,7 @@ const saveOrderToCloud = async (order: Order) => {
       let normalP = 0, loomP = 0;
       list.forEach(p => { if (isLoomPallet(p)) loomP++; else normalP++; });
       const weightSum = list.reduce((s, p) => s + parseFloat(String(p.weight || "0").replace(/,/g, '')||"0"), 0);
-      const boxSum = list.reduce((s, p) => s + (Number(p.boxes)||0), 0) + (Number(finalOrder.looseBoxes) || 0);
+      const boxSum = list.reduce((s, p) => s + (Number(p.boxes)||0), 0) + (Number(finalOrder.looseBoxes) || 0) + getLooseBoxesTotal(finalOrder);
 
       if (finalOrder.pallets !== list.length || finalOrder.boxes !== boxSum || finalOrder.weight !== weightSum.toFixed(2) || finalOrder.normalPallets !== normalP || finalOrder.loomPallets !== loomP) {
         finalOrder.pallets = list.length;
@@ -767,7 +799,7 @@ const saveOrderToCloud = async (order: Order) => {
     let loomP = 0;
     list.forEach(p => { if (isLoomPallet(p)) loomP++; else normalP++; });
     const weightSum = list.reduce((s, p) => s + parseFloat(String(p.weight || "0").replace(/,/g, '') || "0"), 0);
-    const boxSum = list.reduce((s, p) => s + (Number(p.boxes) || 0), 0) + (Number(editingOrder.looseBoxes) || 0);
+    const boxSum = list.reduce((s, p) => s + (Number(p.boxes) || 0), 0) + (Number(editingOrder.looseBoxes) || 0) + getLooseBoxesTotal(editingOrder);
     return { pallets: list.length, normalPallets: normalP, loomPallets: loomP, boxes: boxSum, weight: weightSum };
   }, [editingOrder, activeTab]);
 
@@ -780,19 +812,40 @@ const saveOrderToCloud = async (order: Order) => {
         total += isLoom ? Number(i.qtyPerBox) : (Number(i.boxes)||0) * (Number(i.qtyPerBox)||0);
       }
     }));
+    (order.looseItems || []).forEach(li => {
+      if (li.lineNo === lineNo) total += (Number(li.boxes)||0) * (Number(li.qtyPerBox)||0);
+    });
     return total;
   };
 
   const getPackedBoxesForLine = (lineNo: string, order: Order | null) => {
     if (!order?.palletList) return 0;
     let total = 0;
-    order.palletList.forEach(p => (p.items || []).forEach(i => { 
+    order.palletList.forEach(p => (p.items || []).forEach(i => {
       if (i.lineNo === lineNo) {
         const isLoom = i.boxes === 0 && LOOM_SIZES.includes(String(i.qtyPerBox));
         total += isLoom ? 1 : (Number(i.boxes)||0);
       }
     }));
+    (order.looseItems || []).forEach(li => {
+      if (li.lineNo === lineNo) total += (Number(li.boxes)||0);
+    });
     return total;
+  };
+
+  // Feature: aviso de líneas anteriores olvidadas.
+  // Al agregar la línea N, detecta líneas < N del master list sin nada empacado (pallets ni sueltas).
+  const getMissingEarlierLines = (lineNoStr: string, order: Order | null): string[] => {
+    if (!order?.masterItems) return [];
+    const target = parseInt(lineNoStr);
+    if (isNaN(target)) return [];
+    return order.masterItems
+      .filter(m => {
+        const ln = parseInt(m.lineNo);
+        return !isNaN(ln) && ln < target && getPackedQtyForLine(m.lineNo, order) === 0 && getPackedBoxesForLine(m.lineNo, order) === 0;
+      })
+      .map(m => m.lineNo)
+      .sort((a, b) => parseInt(a) - parseInt(b));
   };
 
   const getBackorders = (order: Order) => {
@@ -835,7 +888,7 @@ const saveOrderToCloud = async (order: Order) => {
         tLoom += oLoom; tNormal += oNormal;
         
         const calcWeight = (o.palletList || []).reduce((acc, p) => acc + parseFloat(String(p.weight||"0").replace(/,/g, '')||"0"), 0);
-        const calcBoxes = (o.palletList || []).reduce((acc, p) => acc + (Number(p.boxes)||0), 0) + (Number(o.looseBoxes) || 0);
+        const calcBoxes = (o.palletList || []).reduce((acc, p) => acc + (Number(p.boxes)||0), 0) + (Number(o.looseBoxes) || 0) + getLooseBoxesTotal(o);
 
         const finalBoxes = o.isManualOverride ? (Number(o.boxes) || 0) + (Number(o.looseBoxes) || 0) : calcBoxes;
         const manualW = parseFloat(String(o.weight||"0").replace(/,/g, ''));
@@ -1417,6 +1470,24 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
 
   const handleSaveLineItem = async () => {
     if (!editingOrder || !editingPalletId || !lineItemForm.itemNumber) return;
+    // Aviso: al agregar (no editar) una línea, checa si líneas anteriores siguen vacías
+    if (!editingLineItemId) {
+      const missing = getMissingEarlierLines(lineItemForm.lineNo, editingOrder);
+      if (missing.length > 0) {
+        setConfirmDialog({
+          isOpen: true,
+          title: "Líneas anteriores vacías",
+          message: `⚠ Aún no has agregado nada de la${missing.length > 1 ? 's líneas' : ' línea'} ${missing.join(', ')}. ¿Agregar la línea ${lineItemForm.lineNo} de todos modos?`,
+          onConfirm: () => { setConfirmDialog(null); doSaveLineItem(); }
+        });
+        return;
+      }
+    }
+    await doSaveLineItem();
+  };
+
+  const doSaveLineItem = async () => {
+    if (!editingOrder || !editingPalletId || !lineItemForm.itemNumber) return;
     if (editingLineItemId) {
       // UPDATE existing item
       setEditingOrder(prev => {
@@ -1509,6 +1580,62 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
     });
   };
 
+  // --- Loose / Mix boxes (cajas sin pallet propio, van mix en pallet de otra orden) ---
+  const handleLooseLineNoChange = (val: string) => {
+    setLooseItemForm(prev => {
+      const masterItem = editingOrder?.masterItems?.find(m => m.lineNo === val);
+      return { ...prev, lineNo: val, itemNumber: masterItem ? masterItem.itemNumber : prev.itemNumber };
+    });
+  };
+
+  const doAddLooseItem = async () => {
+    if (!editingOrder) return;
+    const newLi: LooseItem = {
+      id: `lo_${crypto.randomUUID()}`,
+      lineNo: looseItemForm.lineNo.trim(),
+      itemNumber: looseItemForm.itemNumber.trim(),
+      boxes: parseInt(looseItemForm.boxes) || 0,
+      qtyPerBox: parseInt(looseItemForm.qtyPerBox) || 0,
+      mixNote: looseItemForm.mixNote.trim(),
+      addedBy: currentUser || 'Unknown',
+    };
+    setEditingOrder(prev => prev ? { ...prev, looseItems: [...(prev.looseItems || []), newLi] } : prev);
+    setLooseItemForm({ lineNo: '', itemNumber: '', boxes: '', qtyPerBox: '', mixNote: '' });
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
+      await supabase.from('loose_items').insert({
+        id: newLi.id, order_id: editingOrder.id, line_no: newLi.lineNo, item_number: newLi.itemNumber,
+        boxes: newLi.boxes, qty_per_box: newLi.qtyPerBox, mix_note: newLi.mixNote || null, added_by: newLi.addedBy,
+      });
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
+  };
+
+  const handleAddLooseItem = async () => {
+    if (!editingOrder || !looseItemForm.itemNumber.trim() || !(parseInt(looseItemForm.boxes) > 0)) return;
+    const missing = getMissingEarlierLines(looseItemForm.lineNo, editingOrder);
+    if (missing.length > 0) {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Líneas anteriores vacías",
+        message: `⚠ Aún no has agregado nada de la${missing.length > 1 ? 's líneas' : ' línea'} ${missing.join(', ')}. ¿Agregar la línea ${looseItemForm.lineNo} de todos modos?`,
+        onConfirm: () => { setConfirmDialog(null); doAddLooseItem(); }
+      });
+      return;
+    }
+    await doAddLooseItem();
+  };
+
+  const handleDeleteLooseItem = async (id: string) => {
+    if (!editingOrder) return;
+    setEditingOrder(prev => prev ? { ...prev, looseItems: (prev.looseItems || []).filter(li => li.id !== id) } : prev);
+    if (!IS_PLACEHOLDER_CREDENTIALS && supabase) {
+      isSavingRef.current = true; savingCountRef.current++;
+      await supabase.from('loose_items').delete().eq('id', id);
+      setTimeout(() => { savingCountRef.current = Math.max(0, savingCountRef.current - 1); if (savingCountRef.current === 0) isSavingRef.current = false; }, 3000);
+    }
+  };
+
   const handleBulkLineNoChange = (val: string) => {
     const masterItem = editingOrder?.masterItems?.find(m => m.lineNo === val);
     setBulkForm(prev => ({ ...prev, lineNo: val, itemNo: masterItem ? masterItem.itemNumber : prev.itemNo }));
@@ -1537,6 +1664,21 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
   };
 
   const handleProcessBulkAdd = async () => {
+    if (!editingOrder) return;
+    const missing = getMissingEarlierLines(bulkForm.lineNo, editingOrder);
+    if (missing.length > 0) {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Líneas anteriores vacías",
+        message: `⚠ Aún no has agregado nada de la${missing.length > 1 ? 's líneas' : ' línea'} ${missing.join(', ')}. ¿Agregar la línea ${bulkForm.lineNo} de todos modos?`,
+        onConfirm: () => { setConfirmDialog(null); doProcessBulkAdd(); }
+      });
+      return;
+    }
+    await doProcessBulkAdd();
+  };
+
+  const doProcessBulkAdd = async () => {
     if (!editingOrder) return;
     const list = [...(editingOrder.palletList || [])];
     let nextNum = list.length > 0 ? Math.max(...list.map(p => p.number)) + 1 : 1;
@@ -1648,6 +1790,13 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             <div><span className="font-medium">PO:</span> <span className="text-gray-800 font-bold">{order.po || "N/A"}</span></div>
             <div><span className="font-medium">Truck:</span> <span className="text-gray-800 font-bold">{order.truckId || "Unassigned"}</span></div>
           </div>
+
+          {/* MIX tag — la orden tiene cajas sueltas montadas en pallet de otra orden */}
+          {(order.looseItems?.length || 0) > 0 && (
+            <span className="mt-1.5 inline-flex items-center gap-1 text-[10px] bg-amber-100 text-amber-700 font-bold px-2 py-0.5 rounded w-max" title={order.looseItems!.map(li => `${li.itemNumber} (${li.boxes} cajas)${li.mixNote ? ` — ${li.mixNote}` : ''}`).join(' | ')}>
+              📦 {getLooseBoxesTotal(order)} MIX
+            </span>
+          )}
 
           {/* Lines Pending badge + BO detail tags */}
           {!isReadOnly && order.masterItems && order.masterItems.length > 0 && (() => {
@@ -1863,7 +2012,9 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
               </thead>
               <tbody>
                 {(() => {
-                  const allFlat = editingOrder?.palletList?.flatMap(p => (p.items || []).map(i => ({...i, palletId: p.number}))) || [];
+                  const palletFlat = editingOrder?.palletList?.flatMap(p => (p.items || []).map(i => ({...i, palletId: p.number as number | string, mixNote: '' }))) || [];
+                  const looseFlat = (editingOrder?.looseItems || []).map(li => ({ id: li.id, lineNo: li.lineNo, itemNumber: li.itemNumber, boxes: li.boxes, qtyPerBox: li.qtyPerBox, addedBy: li.addedBy || '', palletId: 'MIX' as number | string, mixNote: li.mixNote || '' }));
+                  const allFlat = [...palletFlat, ...looseFlat];
                   const grouped = allFlat.reduce((acc, item) => {
                     if(!acc[item.lineNo]) acc[item.lineNo] = [];
                     acc[item.lineNo].push(item);
@@ -1888,7 +2039,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                           return (
                           <tr key={`${line}-${it.id}-${idx}`} className="border-b border-gray-100">
                             <td className="px-2 py-1">{it.lineNo}</td>
-                            <td className="px-2 py-1">Pallet {it.palletId}</td>
+                            <td className="px-2 py-1">{it.palletId === 'MIX' ? <span className="font-bold">MIX / Loose{it.mixNote ? ` — ${it.mixNote}` : ''}</span> : `Pallet ${it.palletId}`}</td>
                             <td className="px-2 py-1">{it.itemNumber}</td>
                             <td className="px-2 py-1 text-center">{bxs.toLocaleString()}</td>
                             <td className="px-2 py-1 text-center">{(Number(it.qtyPerBox)||0).toLocaleString()}</td>
@@ -1919,6 +2070,9 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
             <div className="mb-3 text-xs">
               <p><b>Order #:</b> {editingOrder?.orderNumber} | <b>PO:</b> {editingOrder?.po}</p>
               <p><b>Ship Date:</b> {editingOrder?.shipmentDate} &nbsp;|&nbsp; <b>Total Boxes:</b> {totals.boxes.toLocaleString()}</p>
+              {(editingOrder?.looseItems?.length || 0) > 0 && (
+                <p className="text-amber-700"><b>Loose/Mix:</b> {getLooseBoxesTotal(editingOrder!)} boxes sin pallet propio — {editingOrder!.looseItems!.map(li => `${li.itemNumber} (${li.boxes})${li.mixNote ? ` · ${li.mixNote}` : ''}`).join(' | ')}</p>
+              )}
               {(() => {
                 const myPallets = editingOrder?.palletList?.length || 0;
                 const partnerCount = partnerPalletList.length;
@@ -2886,6 +3040,69 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                       </div>
                     )})}
                   </div>
+
+                  {/* LOOSE / MIX BOXES — cajas de esta orden que van mix en pallet de otra orden */}
+                  <div className="mt-8">
+                    <div className="flex items-center gap-3 mb-3 px-1 flex-wrap">
+                      <h3 className="text-xl font-bold text-gray-800">Loose / Mix Boxes</h3>
+                      <span className="text-[11px] text-gray-500">cajas sin pallet propio — van mix en pallet de otra orden pero cuentan aquí</span>
+                    </div>
+                    <div className="bg-white border border-dashed border-amber-400 rounded-md shadow-sm">
+                      {(editingOrder.looseItems || []).length > 0 && (
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-amber-50 text-gray-600 text-xs uppercase">
+                            <tr>
+                              <th className="p-2.5 border-b border-amber-200">Line</th>
+                              <th className="p-2.5 border-b border-amber-200">Item #</th>
+                              <th className="p-2.5 border-b border-amber-200 text-center">Boxes</th>
+                              <th className="p-2.5 border-b border-amber-200 text-center">Qty/Box</th>
+                              <th className="p-2.5 border-b border-amber-200 text-right">Total Pcs</th>
+                              <th className="p-2.5 border-b border-amber-200">Mix Note</th>
+                              <th className="p-2.5 border-b border-amber-200 w-8"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(editingOrder.looseItems || []).map(li => (
+                              <tr key={li.id} className="border-b border-gray-100 hover:bg-amber-50/40">
+                                <td className="p-2.5 font-bold text-gray-700">{li.lineNo}</td>
+                                <td className="p-2.5">{li.itemNumber}</td>
+                                <td className="p-2.5 text-center font-bold">{li.boxes}</td>
+                                <td className="p-2.5 text-center">{(Number(li.qtyPerBox)||0).toLocaleString()}</td>
+                                <td className="p-2.5 text-right font-bold">{((Number(li.boxes)||0) * (Number(li.qtyPerBox)||0)).toLocaleString()}</td>
+                                <td className="p-2.5 text-amber-700 text-xs font-medium">{li.mixNote || '—'}</td>
+                                <td className="p-2.5 text-center">
+                                  <button onClick={() => handleDeleteLooseItem(li.id)} className="text-gray-300 hover:text-red-500"><X className="w-3.5 h-3.5"/></button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                      <div className="p-4 flex flex-wrap gap-2 items-end">
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-1 font-bold uppercase">Line No.</label>
+                          <input value={looseItemForm.lineNo} onChange={e => handleLooseLineNoChange(e.target.value)} placeholder="1" className="w-16 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-amber-400"/>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-1 font-bold uppercase">Item Number</label>
+                          <input value={looseItemForm.itemNumber} onChange={e => setLooseItemForm(f => ({...f, itemNumber: e.target.value}))} placeholder="SKU123" className="w-32 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-amber-400"/>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-1 font-bold uppercase">Boxes</label>
+                          <input type="number" min="1" value={looseItemForm.boxes} onChange={e => setLooseItemForm(f => ({...f, boxes: e.target.value}))} placeholder="0" className="w-20 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-amber-400"/>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-gray-500 mb-1 font-bold uppercase">Qty/Box</label>
+                          <input type="number" min="0" value={looseItemForm.qtyPerBox} onChange={e => setLooseItemForm(f => ({...f, qtyPerBox: e.target.value}))} placeholder="0" className="w-20 border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-amber-400"/>
+                        </div>
+                        <div className="flex-1 min-w-[200px]">
+                          <label className="block text-[11px] text-gray-500 mb-1 font-bold uppercase">Mix Note (con qué orden / pallet va)</label>
+                          <input value={looseItemForm.mixNote} onChange={e => setLooseItemForm(f => ({...f, mixNote: e.target.value}))} placeholder="ej. Mix con orden 01-00347965 en Pallet 5" className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-amber-400"/>
+                        </div>
+                        <button onClick={handleAddLooseItem} className="px-3 py-1.5 bg-amber-500 text-white text-sm rounded font-bold hover:bg-amber-600 flex items-center gap-1"><Plus className="w-4 h-4"/> Add Loose</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </>
             )}
@@ -2906,7 +3123,9 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                     </thead>
                     <tbody>
                       {(() => {
-                        const allFlat = editingOrder?.palletList?.flatMap(p => (p.items || []).map(i => ({...i, palletId: p.number}))) || [];
+                        const palletFlat = editingOrder?.palletList?.flatMap(p => (p.items || []).map(i => ({...i, palletId: p.number as number | string, mixNote: '' }))) || [];
+                  const looseFlat = (editingOrder?.looseItems || []).map(li => ({ id: li.id, lineNo: li.lineNo, itemNumber: li.itemNumber, boxes: li.boxes, qtyPerBox: li.qtyPerBox, addedBy: li.addedBy || '', palletId: 'MIX' as number | string, mixNote: li.mixNote || '' }));
+                  const allFlat = [...palletFlat, ...looseFlat];
                         const grouped = allFlat.reduce((acc, item) => {
                           if(!acc[item.lineNo]) acc[item.lineNo] = [];
                           acc[item.lineNo].push(item);
@@ -2931,7 +3150,7 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                                 return (
                                 <tr key={`${line}-${it.id}-${idx}`} className="border-b border-gray-100">
                                   <td className="p-3">{it.lineNo}</td>
-                                  <td className="p-3">Pallet {it.palletId}</td>
+                                  <td className="p-3">{it.palletId === 'MIX' ? <span className="font-bold text-amber-700">MIX / Loose{it.mixNote ? ` — ${it.mixNote}` : ''}</span> : `Pallet ${it.palletId}`}</td>
                                   <td className="p-3">{it.itemNumber}</td>
                                   <td className="p-3 text-center">{Number(bxs||0).toLocaleString()}</td>
                                   <td className="p-3 text-center">{(Number(it.qtyPerBox)||0).toLocaleString()}</td>
