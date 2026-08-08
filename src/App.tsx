@@ -102,6 +102,8 @@ interface PlannerPallet {
   lengthIn: number;
   isLoom: boolean;
   sizeName?: string;
+  // Loom montado encima de éste (double stack) — solo se usa cuando no cabe todo en el piso
+  stackedNumber?: number;
 }
 interface PlacedPlannerPallet extends PlannerPallet {
   x: number;
@@ -955,7 +957,7 @@ const saveOrderToCloud = async (order: Order) => {
       allPallets.push(...partnerAsPallets);
     }
 
-    const EMPTY = { placed: [] as PlacedPlannerPallet[], groups, dotSteer: 10500, dotDrive: 14000, dotTrailer: 10000, gvw: 34500, totalPayload: 0, usedLength: 0, correctionMessage: null as string | null, feasible: true, kingpinY: 0, axleY: 0 };
+    const EMPTY = { placed: [] as PlacedPlannerPallet[], groups, dotSteer: 10500, dotDrive: 14000, dotTrailer: 10000, gvw: 34500, totalPayload: 0, usedLength: 0, correctionMessage: null as string | null, feasible: true, kingpinY: 0, axleY: 0, stacksUsed: 0, unplaced: 0, totalPallets: 0, placedPhysical: 0 };
     if (allPallets.length === 0) return EMPTY;
 
     // DOT geometry (mirrors standalone planner)
@@ -1048,22 +1050,30 @@ const saveOrderToCloud = async (order: Order) => {
     const applyBest = (cargo: PlannerPallet[], pMin: number, pMax: number) => {
       const cgMin = KINGPIN_Y + pMin * axleDist;
       const cgMax = KINGPIN_Y + pMax * axleDist;
-      const base = tryLayout(cargo, 0, 'interleaved');
-      if (base.err) return { layout: base, shift: 0, bias: 'interleaved' as RowBias };
+      let base = tryLayout(cargo, 0, 'interleaved');
+      let baseBias: RowBias = 'interleaved';
+      if (base.err) {
+        // Con filas intercaladas se quedan pallets fuera: reintenta con el empaque
+        // más denso (todas las filas de a 2) antes de darse por vencido.
+        const dense = tryLayout(cargo, 0, 'maxDensity');
+        if (!dense.err) { base = dense; baseBias = 'maxDensity'; }
+        else return { layout: dense, shift: 0, bias: 'maxDensity' as RowBias };
+      }
       const baseCG = base.totalPayload > 0 ? base.cgYSum / base.totalPayload : cgMin;
-      if (baseCG >= cgMin && baseCG <= cgMax) return { layout: base, shift: 0, bias: 'interleaved' as RowBias };
+      if (baseCG >= cgMin && baseCG <= cgMax) return { layout: base, shift: 0, bias: baseBias };
       const needsUp = baseCG < cgMin;
       const bias: RowBias = needsUp ? 'rear' : 'front';
       const rebiased = tryLayout(cargo, 0, bias);
       const best = rebiased.err ? base : rebiased;
-      if (!needsUp) return { layout: best, shift: 0, bias };
+      const bestBias = rebiased.err ? baseBias : bias;
+      if (!needsUp) return { layout: best, shift: 0, bias: bestBias };
       const bestCG = best.totalPayload > 0 ? best.cgYSum / best.totalPayload : cgMin;
-      if (bestCG >= cgMin) return { layout: best, shift: 0, bias };
+      if (bestCG >= cgMin) return { layout: best, shift: 0, bias: bestBias };
       const slack = Math.max(0, planLoadTrailerLength - best.usedLength);
       const shift = Math.min(cgMin - bestCG, slack);
-      if (shift <= 0.5) return { layout: best, shift: 0, bias };
-      const shifted = tryLayout(cargo, shift, bias);
-      return shifted.err ? { layout: best, shift: 0, bias } : { layout: shifted, shift, bias };
+      if (shift <= 0.5) return { layout: best, shift: 0, bias: bestBias };
+      const shifted = tryLayout(cargo, shift, bestBias);
+      return shifted.err ? { layout: best, shift: 0, bias: bestBias } : { layout: shifted, shift, bias: bestBias };
     };
 
     // --- Main flow ---
@@ -1080,8 +1090,32 @@ const saveOrderToCloud = async (order: Order) => {
       .sort((a, b) => a.weight - b.weight);
     const sortedLooms = [...loomGroup].sort((a, b) => a.weight - b.weight);
 
-    // Final order: [heavy anchor] + [looms] + [tail Hyundai lighter→heavier]
-    let currentCargo = [...anchorPair, ...sortedLooms, ...tailNonLoom];
+    // Los looms se pueden apilar de a 2 (double stack). Se prefiere todo en el piso;
+    // solo se apila lo mínimo necesario para que la carga entre en el trailer.
+    const buildCargo = (numStacks: number): PlannerPallet[] => {
+      const pool = [...sortedLooms];
+      const looms: PlannerPallet[] = [];
+      for (let i = 0; i < numStacks && pool.length >= 2; i++) {
+        const bottom = pool.shift()!;
+        const top = pool.shift()!;
+        // El par ocupa una sola posición de piso y suma ambos pesos
+        looms.push({ ...bottom, weight: bottom.weight + top.weight, stackedNumber: top.palletNumber });
+      }
+      looms.push(...pool);
+      return [...anchorPair, ...looms, ...tailNonLoom];
+    };
+
+    const maxStacks = Math.floor(sortedLooms.length / 2);
+    let stacksUsed = 0;
+    let currentCargo = buildCargo(0);
+    // Sube el número de pares apilados hasta que todo quepa (probando ambos empaques)
+    for (let s = 0; s <= maxStacks; s++) {
+      const candidate = buildCargo(s);
+      stacksUsed = s;
+      currentCargo = candidate;
+      if (!tryLayout(candidate, 0, 'interleaved').err) break;
+      if (!tryLayout(candidate, 0, 'maxDensity').err) break;
+    }
 
     let { layout, shift, bias } = applyBest(currentCargo, 0, 1);
     const { pMin, pMax, feasible } = computeRange(layout.totalPayload);
@@ -1098,8 +1132,18 @@ const saveOrderToCloud = async (order: Order) => {
       correctionMessage = msgs.length > 0 ? `DOT Safe: ${msgs.join(' · ')}.` : null;
     }
 
+    // Cuántas pallets físicas quedaron acomodadas (un stack cuenta como 2)
+    const placedPhysical = layout.placed.reduce((s, p) => s + (p.stackedNumber ? 2 : 1), 0);
+    const unplaced = allPallets.length - placedPhysical;
+
     const dot = calcDOT(layout.totalPayload, layout.cgYSum);
-    return { placed: layout.placed, groups, dotSteer: dot.steer, dotDrive: dot.drive, dotTrailer: dot.trailer, gvw: dot.gvw, totalPayload: layout.totalPayload, usedLength: layout.usedLength, correctionMessage, feasible, kingpinY: KINGPIN_Y, axleY: trailerAxleY };
+    return {
+      placed: layout.placed, groups,
+      dotSteer: dot.steer, dotDrive: dot.drive, dotTrailer: dot.trailer, gvw: dot.gvw,
+      totalPayload: layout.totalPayload, usedLength: layout.usedLength,
+      correctionMessage, feasible, kingpinY: KINGPIN_Y, axleY: trailerAxleY,
+      stacksUsed, unplaced, totalPallets: allPallets.length, placedPhysical,
+    };
   }, [planLoadTruckId, planLoadTrailerLength, planLoadTrailerWidth, truckReportSummary, orders, partnerPalletList]);
 
   // --- UI Functions and Actions ---
@@ -3698,9 +3742,12 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                   <div className="space-y-1">
                     {(plannerResult?.groups || []).map(g => {
                       const totalW = g.pallets.reduce((s, p) => s + p.weight, 0);
+                      const gLabel = g.orderId === 'partner'
+                        ? 'Partner'
+                        : (orders.find(o => o.id === g.orderId)?.orderNumber || g.orderId);
                       return (
                         <div key={g.orderId} className="flex items-center gap-2 p-1.5 rounded border bg-gray-50 border-gray-200">
-                          <span className="text-xs font-bold text-gray-700">{g.orderId}</span>
+                          <span className="text-xs font-bold text-gray-700">{gLabel}</span>
                           <span className="text-[10px] ml-auto text-gray-500">{g.pallets.length} plt · {totalW > 0 ? Math.round(totalW).toLocaleString() + ' lbs' : '—'}</span>
                         </div>
                       );
@@ -3730,8 +3777,19 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                 {plannerResult && (
                   <div className="text-xs text-gray-500 border-t pt-3 space-y-1">
                     <div>Payload: <b className="text-gray-800">{plannerResult.totalPayload > 0 ? Math.round(plannerResult.totalPayload).toLocaleString() + ' lbs' : '—'}</b></div>
-                    <div>Pallets ubicados: <b className="text-gray-800">{plannerResult.placed.length}</b></div>
+                    <div>Pallets ubicados: <b className="text-gray-800">{plannerResult.placedPhysical}</b> / {plannerResult.totalPallets}</div>
+                    {plannerResult.stacksUsed > 0 && (
+                      <div>Looms en double stack: <b className="text-purple-700">{plannerResult.stacksUsed} par{plannerResult.stacksUsed > 1 ? 'es' : ''}</b> ({plannerResult.stacksUsed * 2} looms)</div>
+                    )}
                     <div>Longitud usada: <b className="text-gray-800">{Math.round(plannerResult.usedLength)}"</b> / {planLoadTrailerLength}"</div>
+                  </div>
+                )}
+
+                {/* No cabe todo — aviso explícito para que no pase desapercibido */}
+                {plannerResult && plannerResult.unplaced > 0 && (
+                  <div className="mt-3 p-2 rounded-md bg-red-50 border border-red-300 text-red-800 text-[10px] leading-snug font-semibold">
+                    ⚠ No caben {plannerResult.unplaced} pallet{plannerResult.unplaced > 1 ? 's' : ''} en este trailer
+                    {plannerResult.stacksUsed > 0 ? ' aun apilando todos los looms posibles' : ''}. Hay que mover carga a otro truck.
                   </div>
                 )}
 
@@ -3811,17 +3869,27 @@ const toggleDate = (date: string, trucks?: TruckData[]) => {
                           // Clamp width so pallets never draw outside the trailer border
                           const pw = Math.max(2, Math.min(Math.round(p.widthIn * scale), vizW - px));
                           const ph = Math.max(2, Math.round(p.lengthIn * scale));
-                          const label = isPartner ? `P${p.palletNumber}` : `#${p.palletNumber}`;
+                          const prefix = isPartner ? 'P' : '#';
+                          // Loom apilado: la casilla representa 2 pallets (abajo + arriba)
+                          const label = p.stackedNumber
+                            ? `${prefix}${p.palletNumber}+${prefix}${p.stackedNumber}`
+                            : `${prefix}${p.palletNumber}`;
+                          const orderLabel = isPartner
+                            ? 'Partner'
+                            : (orders.find(o => o.id === p.orderId)?.orderNumber || p.orderId);
                           return (
                             <div
                               key={p.id}
-                              className={`absolute border flex flex-col items-center justify-center overflow-hidden cursor-default select-none ${c.bg} ${c.border}`}
+                              className={`absolute border flex flex-col items-center justify-center overflow-hidden cursor-default select-none ${c.bg} ${c.border} ${p.stackedNumber ? 'ring-1 ring-inset ring-purple-600 border-dashed' : ''}`}
                               style={{ left: px, top: py, width: pw, height: ph }}
-                              title={`${isPartner ? 'Partner' : p.orderId} · Pallet ${isPartner ? 'P' : '#'}${p.palletNumber} · ${p.sizeName || '?'} · ${p.widthIn}"×${p.lengthIn}" · ${p.weight > 0 ? Math.round(p.weight).toLocaleString() + ' lbs' : '—'}`}
+                              title={`${orderLabel} · Pallet ${prefix}${p.palletNumber}${p.stackedNumber ? ` + ${prefix}${p.stackedNumber} (double stack)` : ''} · ${p.sizeName || '?'} · ${p.widthIn}"×${p.lengthIn}" · ${p.weight > 0 ? Math.round(p.weight).toLocaleString() + ' lbs' : '—'}`}
                             >
-                              <span className={`font-bold leading-none text-center ${c.text}`} style={{ fontSize: Math.min(9, ph * 0.32) }}>
+                              <span className={`font-bold leading-none text-center ${c.text}`} style={{ fontSize: Math.min(p.stackedNumber ? 8 : 9, ph * 0.3) }}>
                                 {label}
                               </span>
+                              {p.stackedNumber && ph > 20 && (
+                                <span className={`leading-none ${c.text} font-black`} style={{ fontSize: Math.min(6, ph * 0.18) }}>2×</span>
+                              )}
                               {ph > 14 && p.weight > 0 && (
                                 <span className={`leading-none ${c.text} opacity-70`} style={{ fontSize: Math.min(7, ph * 0.22) }}>
                                   {Math.round(p.weight / 100) / 10}k
